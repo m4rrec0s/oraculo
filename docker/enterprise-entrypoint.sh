@@ -3,6 +3,20 @@
 # 1. Install missing deps  2. Setup profile  3. Generate config  4. Run gateway
 set -euo pipefail
 
+# Drop to the unprivileged "hermes" user. Easypanel may mount the data volume
+# root-owned, which breaks profile creation ("Permission denied"). Fix
+# ownership once as root, then re-exec as hermes.
+if [ "$(id -u)" = "0" ]; then
+    chown -R hermes:hermes /home/hermes 2>/dev/null || true
+    python3 -m pip install --quiet pg8000 aiohttp 2>/dev/null || true
+    if command -v setpriv >/dev/null 2>&1; then
+        exec setpriv --reuid=hermes --regid=hermes --clear-groups "$0" "$@"
+    elif command -v su >/dev/null 2>&1; then
+        exec su hermes -s /bin/bash -c "exec '$0' $(printf '%q ' "$@")"
+    fi
+    # fallback: continue as root (functional, privilege not dropped)
+fi
+
 # Ensure pg8000 (read-only Cesto DB stats) is available for daily_summary.py
 python3 -m pip install --quiet pg8000 >/dev/null 2>&1 || true
 
@@ -23,6 +37,8 @@ MODEL_PROVIDER="${MODEL_PROVIDER:-nvidia}"
 MODEL_NAME="${MODEL_NAME:-nvidia/nemotron-3-super-120b-a12b}"
 MODEL_BASE_URL="${MODEL_BASE_URL:-https://integrate.api.nvidia.com/v1}"
 API_KEY_VAR="${API_KEY_VAR:-NVIDIA_API_KEY}"
+# Resolve the actual key value from the provider-specific env var name
+API_KEY_VAL="${!API_KEY_VAR:-}"
 
 log "Profile: ${MAGENTA}${PROFILE}${NC}"
 log "Model:   ${MAGENTA}${MODEL_PROVIDER}/${MODEL_NAME}${NC}"
@@ -151,6 +167,7 @@ model:
   provider: ${PROVIDER_CONFIG}
   default: ${MODEL_NAME}
   base_url: ${MODEL_BASE_URL}
+  api_key: "${API_KEY_VAL}"
 
 agent:
   name: ${AGENT_NAME:-Ana}
@@ -214,6 +231,7 @@ model:
   provider: ${PROVIDER_CONFIG}
   default: ${MODEL_NAME}
   base_url: ${MODEL_BASE_URL}
+  api_key: "${API_KEY_VAL}"
 
 agent:
   name: ${AGENT_NAME:-Hermes}
@@ -330,4 +348,4 @@ fi
 
 # ==================== 4. RUN ====================
 log "Starting Hermes gateway..."
-exec python -m hermes_cli.main "$@" gateway run
+exec python -m hermes_cli.main -p "${PROFILE}" gateway run

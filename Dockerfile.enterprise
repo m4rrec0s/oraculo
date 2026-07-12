@@ -66,7 +66,9 @@ RUN mkdir -p \
     /home/hermes/.hermes/memories \
     && chown -R hermes:hermes /home/hermes/.hermes
 
-USER hermes
+# NOTE: deliberately NOT "USER hermes" — the enterprise entrypoint starts as
+# root to chown the (possibly root-owned) Easypanel data volume, then drops to
+# the unprivileged "hermes" user via setpriv/su.
 
 # Variáveis de ambiente padrão
 ENV HERMES_HOME=/home/hermes/.hermes \
