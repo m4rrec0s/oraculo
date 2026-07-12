@@ -1,0 +1,87 @@
+# Hermes Enterprise Dockerfile — Cesto d'Amore
+# Multi-stage build para imagem otimizada
+
+# ==================== BASE ====================
+FROM python:3.12-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Dependências do sistema
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Usuário não-root
+RUN groupadd -r hermes && useradd -r -g hermes -d /home/hermes -s /bin/bash hermes
+RUN mkdir -p /home/hermes/.hermes && chown -R hermes:hermes /home/hermes
+
+WORKDIR /app
+
+# ==================== BUILDER ====================
+FROM base AS builder
+
+# Copiar arquivos de dependência
+COPY pyproject.toml uv.lock* ./
+COPY enterprise/ ./enterprise/
+
+# Instalar dependências Python via uv (mais rápido)
+RUN pip install --no-cache-dir uv && \
+    uv pip install --system --no-cache -r pyproject.toml
+
+# ==================== RUNTIME ====================
+FROM base AS runtime
+
+# Copiar dependências instaladas
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copiar código da aplicação
+COPY --chown=hermes:hermes . /app
+
+# Copiar configurações enterprise
+COPY --chown=hermes:hermes enterprise/config /home/hermes/.hermes/enterprise/config
+COPY --chown=hermes:hermes skills/cesto-damore /home/hermes/.hermes/skills/cesto-damore
+COPY --chown=hermes:hermes enterprise/skills /home/hermes/enterprise/skills
+COPY --chown=hermes:hermes enterprise/soul /home/hermes/enterprise/soul
+COPY --chown=hermes:hermes enterprise/mcp/ana_sessions.sql /home/hermes/enterprise/mcp/ana_sessions.sql
+# Built frontend assets (produced by CI before the docker build)
+COPY --chown=hermes:hermes hermes_cli/web_dist /app/hermes_cli/web_dist
+COPY --chown=hermes:hermes ui-tui/dist /app/ui-tui/dist
+
+# Criar diretórios necessários
+RUN mkdir -p \
+    /home/hermes/.hermes/enterprise/permissions \
+    /home/hermes/.hermes/enterprise/learning \
+    /home/hermes/.hermes/enterprise/crm \
+    /home/hermes/.hermes/logs \
+    /home/hermes/.hermes/cache \
+    /home/hermes/.hermes/sessions \
+    /home/hermes/.hermes/memories \
+    && chown -R hermes:hermes /home/hermes/.hermes
+
+USER hermes
+
+# Variáveis de ambiente padrão
+ENV HERMES_HOME=/home/hermes/.hermes \
+    ENTERPRISE_CONFIG=/home/hermes/.hermes/enterprise/config/enterprise.yaml \
+    SOUL_FILE=/home/hermes/.hermes/enterprise/config/SOUL.md \
+    PYTHONPATH=/app:/app/enterprise
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import enterprise; print('Enterprise OK')" || exit 1
+
+# Copiar entrypoint enterprise
+COPY --chown=hermes:hermes docker/enterprise-entrypoint.sh /home/hermes/enterprise-entrypoint.sh
+RUN chmod +x /home/hermes/enterprise-entrypoint.sh
+
+# Entry point - usa enterprise entrypoint
+ENTRYPOINT ["/home/hermes/enterprise-entrypoint.sh"]
+CMD ["python", "-m", "hermes_cli.main", "--help"]

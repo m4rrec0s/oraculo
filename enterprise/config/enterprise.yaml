@@ -1,0 +1,190 @@
+# Hermes Enterprise — Configuração Cesto d'Amore
+
+enterprise:
+  enabled: true
+  company: "Cesto d'Amore"
+  domain: "cestodamore.com.br"
+  environment: "production"  # development, staging, production
+
+profiles:
+  active: "atendimento"  # admin, atendimento
+  auto_switch:
+    gateway_platform: true  # troca perfil baseado na plataforma do gateway
+    admin_users: ["admin@cestodamore.com.br"]
+
+permissions:
+  config_dir: "~/.hermes/enterprise/permissions"
+  enforce_at_registry: true
+  enforce_at_skill_loader: true
+  enforce_at_mcp_client: true
+  enforce_at_gateway: true
+
+crm:
+  enabled: true
+  backend_url: "https://api.cestodamore.com.br"
+  sync_interval_minutes: 15
+  customer_fields:
+    - phone
+    - name
+    - email
+    - birth_date
+    - anniversary_dates
+    - preferences
+    - tags
+    - last_order_date
+    - total_orders
+    - total_spent
+  conversation_retention_days: 365
+
+analytics:
+  enabled: true
+  metrics:
+    - conversions
+    - avg_response_time
+    - sentiment
+    - top_products
+    - customer_satisfaction
+  export_interval_hours: 1
+  retention_days: 730
+
+learning:
+  enabled: true
+  admin_only: true  # apenas admin pode aprovar novas versões de skills
+  analyzer_model: "gpt-4o"
+  min_sessions_for_analysis: 50
+  max_daily_updates: 3
+  auto_deploy: false  # requer aprovação manual
+  rollback_enabled: true
+  version_history_limit: 50
+  audit_log: true
+
+dashboard:
+  modules:
+    crm: true
+    analytics: true
+    learning: true
+    administration: true
+  theme: "cesto-damore"
+  brand_color: "#FF6B9D"
+  language: "pt-BR"
+
+integrations:
+  erp:
+    type: "mcp"
+    server: "cesto-damore-erp"
+    enabled: true
+  whatsapp:
+    type: "mcp"
+    server: "cesto-damore-whatsapp"
+    enabled: true
+    platform: "360dialog"
+  n8n:
+    enabled: true
+    webhook_url: "https://n8n.cestodamore.com.br/webhook/hermes"
+    events:
+      - new_conversation
+      - order_created
+      - delivery_status
+      - customer_tag_added
+
+gateways:
+  whatsapp:
+    platform: "360dialog"
+    phone_number_id: "auto"
+    webhook_verify_token: "env:WHATSAPP_WEBHOOK_TOKEN"
+    rate_limit_per_phone: 10
+    rate_limit_window_seconds: 60
+    message_limit_chars: 300
+    auto_split_long: true
+    media_support: true
+
+mcp:
+  servers:
+    cesto-damore-erp:
+      command: "npx"
+      args: ["-y", "@cestodamore/mcp-erp"]
+      env:
+        ERP_API_URL: "https://api.cestodamore.com.br"
+        ERP_API_KEY: "env:ERP_API_KEY"
+      tools:
+        - search_products
+        - get_product
+        - create_order
+        - get_order
+        - calculate_delivery
+        - check_delivery_zone
+        - apply_coupon
+        - get_customization_options
+        - validate_customization
+      profile_permissions:
+        admin: ["*"]
+        atendimento: ["search_products", "get_product", "get_order", "calculate_delivery", "check_delivery_zone"]
+    cesto-damore-whatsapp:
+      command: "npx"
+      args: ["-y", "@cestodamore/mcp-whatsapp"]
+      env:
+        WHATSAPP_TOKEN: "env:WHATSAPP_TOKEN"
+        WHATSAPP_PHONE_ID: "env:WHATSAPP_PHONE_ID"
+      tools:
+        - send_message
+        - send_template
+        - get_media
+      profile_permissions:
+        admin: ["*"]
+        atendimento: ["send_message", "send_template"]
+
+skills:
+  enterprise_dir: "skills/cesto-damore"
+  auto_load:
+    - "humanizer"
+    - "entrega"
+    - "personalizacao"
+    - "politicas"
+  max_per_turn: 3
+  activator:
+    keyword_boost: 15
+    intent_threshold_boost: 5
+
+models:
+  admin:
+    default: "nvidia/nemotron-3-super-120b-a12b"
+    provider: "nvidia"
+    base_url: "https://integrate.api.nvidia.com/v1"
+  atendimento:
+    default: "gpt-4o-mini"
+    provider: "openai"
+    classifier: "gpt-4o-mini"
+    compression: "gpt-4o"
+    embeddings: "text-embedding-3-small"
+
+context:
+  compression:
+    enabled: true
+    threshold_admin: 0.3
+    threshold_atendimento: 0.5
+    target_ratio: 0.2
+    protect_last_n_admin: 20
+    protect_last_n_atendimento: 15
+
+memory:
+  enabled: true
+  provider: "hybrid"  # local + backend CRM
+  short_term_turns: 10
+  long_term_backend: "crm"
+  user_profile_enabled: true
+  write_approval: false  # admin only
+
+logging:
+  level: "INFO"
+  enterprise_logs: true
+  audit_trail: true
+  pii_redaction: true
+
+security:
+  tirith_enabled: true
+  tirith_path: "tirith"
+  website_blocklist:
+    enabled: true
+    domains: []
+    allowed_domains: ["cestodamore.com.br", "cestodamore.com"]
+  secret_redaction: true
