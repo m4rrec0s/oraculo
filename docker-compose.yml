@@ -1,76 +1,170 @@
-#
-# docker-compose.yml for Hermes Agent
-#
-# Usage:
-#   HERMES_UID=$(id -u) HERMES_GID=$(id -g) docker compose up -d
-#
-# Set HERMES_UID / HERMES_GID to the host user that owns ~/.hermes so
-# files created inside the container stay readable/writable on the host.
-# The s6-overlay stage2 hook remaps the internal `hermes` user to these
-# values via usermod/groupmod; each supervised service then drops to that
-# user via `s6-setuidgid`.
-#
-# Security notes:
-#   - The dashboard service binds to 127.0.0.1 by default. It stores API
-#     keys; exposing it on LAN without auth is unsafe. If you want remote
-#     access, use an SSH tunnel or put it behind a reverse proxy that
-#     adds authentication — do NOT pass --insecure --host 0.0.0.0.
-#   - If you override entrypoint, keep `/init` as the first command in
-#     the chain (or let docker use the image's default ENTRYPOINT,
-#     which is `["/init", "/opt/hermes/docker/main-wrapper.sh"]`).
-#     `/init` is s6-overlay's PID 1 — it runs the cont-init.d scripts
-#     (chown, profile reconcile, dashboard toggle) and sets up the
-#     supervision tree before any service starts. Bypassing it skips
-#     all of that setup and the gateway will not work correctly.
-#   - The gateway's API server is off unless you uncomment API_SERVER_KEY
-#     and API_SERVER_HOST. See docs/user-guide/api-server.md before doing
-#     this on an internet-facing host.
-#
-services:
-  gateway:
-    build: .
-    image: hermes-agent
-    container_name: hermes
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - ~/.hermes:/opt/data
-    environment:
-      - HERMES_UID=${HERMES_UID:-10000}
-      - HERMES_GID=${HERMES_GID:-10000}
-      # To expose the OpenAI-compatible API server beyond localhost,
-      # uncomment BOTH lines (API_SERVER_KEY is mandatory for auth):
-      # - API_SERVER_HOST=0.0.0.0
-      # - API_SERVER_KEY=${API_SERVER_KEY}
-      # Microsoft Teams — uncomment and fill in to enable Teams gateway.
-      # Register your bot at https://dev.botframework.com/ to get these values.
-      # - TEAMS_CLIENT_ID=${TEAMS_CLIENT_ID}
-      # - TEAMS_CLIENT_SECRET=${TEAMS_CLIENT_SECRET}
-      # - TEAMS_TENANT_ID=${TEAMS_TENANT_ID}
-      # - TEAMS_ALLOWED_USERS=${TEAMS_ALLOWED_USERS}
-      # - TEAMS_PORT=${TEAMS_PORT:-3978}
-      # Google Chat — uncomment and fill in to enable the Google Chat gateway.
-      # See website/docs/user-guide/messaging/google_chat.md for the full setup.
-      # The SA JSON path must point to a file mounted into the container —
-      # add a volume entry above (e.g. ``- ~/.hermes/google-chat-sa.json:/secrets/google-chat-sa.json:ro``)
-      # then set GOOGLE_CHAT_SERVICE_ACCOUNT_JSON to that mount path.
-      # - GOOGLE_CHAT_PROJECT_ID=${GOOGLE_CHAT_PROJECT_ID}
-      # - GOOGLE_CHAT_SUBSCRIPTION_NAME=${GOOGLE_CHAT_SUBSCRIPTION_NAME}
-      # - GOOGLE_CHAT_SERVICE_ACCOUNT_JSON=${GOOGLE_CHAT_SERVICE_ACCOUNT_JSON}
-      # - GOOGLE_CHAT_ALLOWED_USERS=${GOOGLE_CHAT_ALLOWED_USERS}
-    command: ["gateway", "run"]
+# Hermes Enterprise — Docker Compose
+# Dois agentes: Admin (controle) + Ana (atendimento HTTP)
+# Comunicação via HTTP headers: X-Hermes-Agent: admin | ana
 
-  dashboard:
-    image: hermes-agent
-    container_name: hermes-dashboard
-    restart: unless-stopped
-    network_mode: host
-    depends_on:
-      - gateway
-    volumes:
-      - ~/.hermes:/opt/data
+services:
+  # ==================== ADMIN PROFILE ====================
+  hermes-admin:
+    image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
+    container_name: hermes-enterprise-admin
+    command: ["-p", "admin"]
+    user: "0:0"
     environment:
-      - HERMES_UID=${HERMES_UID:-10000}
-      - HERMES_GID=${HERMES_GID:-10000}
-    # Localhost-only. For remote access, tunnel via `ssh -L 9119:localhost:9119`.
-    command: ["dashboard", "--host", "127.0.0.1", "--no-open"]
+      - ENTERPRISE_PROFILE=admin
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Model config — NVIDIA NIM by default for admin
+      - MODEL_PROVIDER=${ADMIN_MODEL_PROVIDER}
+      - MODEL_NAME=${ADMIN_MODEL_NAME}
+      - MODEL_BASE_URL=${ADMIN_MODEL_BASE_URL}
+      - AGENT_NAME=${ADMIN_AGENT_NAME}
+      # Postgres dedicado do Hermes (HERMES_PG_*) — dados operacionais do agente
+      - HERMES_PG_HOST=${HERMES_PG_HOST}
+      - HERMES_PG_PORT=${HERMES_PG_PORT}
+      - HERMES_PG_DATABASE=${HERMES_PG_DATABASE}
+      - HERMES_PG_USER=${HERMES_PG_USER}
+      - HERMES_PG_PASSWORD=${HERMES_PG_PASSWORD}
+      # Telegram
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      # Cesto d'Amore API (daily stats)
+      - CESTO_API_URL=${CESTO_API_URL:-https://api.cestodamore.com.br}
+      - CESTO_API_KEY=${CESTO_API_KEY:-}
+      - CESTO_API_EMAIL=${CESTO_API_EMAIL:-}
+      - CESTO_API_PASSWORD=${CESTO_API_PASSWORD:-}
+      # Cesto produção DB (read-only, resumo diário)
+      - CESTO_PROD_PG_HOST=${CESTO_PROD_PG_HOST:-}
+      - CESTO_PROD_PG_PORT=${CESTO_PROD_PG_PORT:-54320}
+      - CESTO_PROD_PG_DATABASE=${CESTO_PROD_PG_DATABASE:-cesto_damore}
+      - CESTO_PROD_PG_USER=${CESTO_PROD_PG_USER:-postgres}
+      - CESTO_PROD_PG_PASSWORD=${CESTO_PROD_PG_PASSWORD:-}
+      # WaHa (WhatsApp) for daily summary delivery
+      - WAHA_API_URL=${WAHA_API_URL:-https://cesto-damore-waha.ovtvje.easypanel.host/}
+      - WAHA_API_KEY=${WAHA_API_KEY:-}
+      - WAHA_INSTANCE=${WAHA_INSTANCE:-CestoDamore}
+      - WHATSAPP_GROUP_ID=${WHATSAPP_GROUP_ID:-}
+      # API Server
+      - API_SERVER_ENABLED=${ADMIN_API_SERVER_ENABLED}
+      - API_SERVER_PORT=${ADMIN_API_SERVER_PORT}
+      - API_SERVER_HOST=${ADMIN_API_SERVER_HOST}
+      - API_SERVER_KEY=${ADMIN_API_KEY}
+      - GATEWAY_ALLOW_ALL_USERS=${GATEWAY_ALLOW_ALL_USERS}
+      # Dashboard
+      - DASHBOARD_ENABLED=${DASHBOARD_ENABLED}
+      - DASHBOARD_PORT=${DASHBOARD_PORT}
+      - DASHBOARD_HOST=${DASHBOARD_HOST}
+    volumes:
+      - hermes-admin-data:/home/hermes/.hermes/profiles/admin
+      # Managing Profile: Admin can read/write Ana's files at /managed/ana
+      - hermes-ana-profile:/managed/ana:rw
+    ports:
+      - "8081:8081"    # API Server
+      - "9119:9119"    # Dashboard
+    networks:
+      - hermes-enterprise
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  # ==================== ATENDIMENTO PROFILE ====================
+  hermes-atendimento:
+    image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
+    container_name: hermes-enterprise-atendimento
+    command: ["-p", "atendimento"]
+    user: "0:0"
+    environment:
+      - ENTERPRISE_PROFILE=atendimento
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Model config — OpenAI gpt-5-nano for Ana
+      - MODEL_PROVIDER=${ANA_MODEL_PROVIDER}
+      - MODEL_NAME=${ANA_MODEL_NAME}
+      - MODEL_BASE_URL=${ANA_MODEL_BASE_URL}
+      - AGENT_NAME=${ANA_AGENT_NAME}
+      # Postgres dedicado do Hermes (HERMES_PG_*) — dados operacionais do agente
+      - HERMES_PG_HOST=${HERMES_PG_HOST}
+      - HERMES_PG_PORT=${HERMES_PG_PORT}
+      - HERMES_PG_DATABASE=${HERMES_PG_DATABASE}
+      - HERMES_PG_USER=${HERMES_PG_USER}
+      - HERMES_PG_PASSWORD=${HERMES_PG_PASSWORD}
+      # API Server
+      - API_SERVER_ENABLED=${ANA_API_SERVER_ENABLED}
+      - API_SERVER_PORT=${ANA_API_SERVER_PORT}
+      - API_SERVER_HOST=${ANA_API_SERVER_HOST}
+      - API_SERVER_KEY=${ANA_API_KEY}
+      - GATEWAY_ALLOW_ALL_USERS=${GATEWAY_ALLOW_ALL_USERS}
+    volumes:
+      # Shared with Admin (Managing Profile): Ana's profile lives here
+      - hermes-ana-profile:/home/hermes/.hermes/profiles/atendimento
+    ports:
+      - "8082:8082"    # API Server
+    networks:
+      - hermes-enterprise
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  # ==================== POSTGRES ====================
+  postgres:
+    image: postgres:16-alpine
+    container_name: hermes-enterprise-postgres
+    environment:
+      - POSTGRES_DB=hermes_enterprise
+      - POSTGRES_USER=hermes
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - hermes-enterprise
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes_enterprise"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== REDIS ====================
+  redis:
+    image: redis:7-alpine
+    container_name: hermes-enterprise-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - hermes-enterprise
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  hermes-admin-data:
+  hermes-ana-profile:
+  postgres-data:
+  redis-data:
+
+networks:
+  hermes-enterprise:
+    driver: bridge
+    name: hermes-enterprise-network
