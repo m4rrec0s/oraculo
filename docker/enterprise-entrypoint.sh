@@ -36,7 +36,9 @@ pip install --quiet aiohttp 2>/dev/null && ok "aiohttp installed" || warn "aioht
 # Idempotente (CREATE IF NOT EXISTS). Roda em admin E atendimento.
 if [[ -n "${HERMES_PG_HOST:-}" ]]; then
   log "Ensuring Ana sessions schema on ${HERMES_PG_HOST}..."
-  python3 - <<'PYEOF'
+  ensured=0
+  for i in $(seq 1 18); do
+    if python3 - <<'PYEOF'
 import os, sys
 try:
     import pg8000
@@ -73,9 +75,23 @@ try:
     cur.close()
     conn.close()
     print("[ENTERPRISE] ana_sessions schema ensured")
+    sys.exit(0)
 except Exception as e:
     print(f"[ENTERPRISE] WARN: ana schema ensure failed: {e}")
+    sys.exit(1)
 PYEOF
+    then
+      ensured=1
+      ok "ana_sessions schema ensured (attempt $i)"
+      break
+    else
+      warn "ana schema ensure attempt $i failed, retrying in 10s..."
+      sleep 10
+    fi
+  done
+  if [[ $ensured -eq 0 ]]; then
+    err "ana_sessions schema NOT ensured after retries — Ana sessions persistence disabled"
+  fi
 fi
 
 # ==================== 2. SETUP PROFILE ====================

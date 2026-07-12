@@ -1,172 +1,147 @@
-# Hermes Enterprise — Docker Compose (Easypanel-ready)
-# Dois agentes: Admin (controle + dashboard) + Ana (atendimento HTTP)
-# Comunicação via HTTP headers: X-Hermes-Agent: admin | ana
-#
-# Todas as vars usam ${VAR:-default} para subir mesmo sem env externa.
-# Secrets (API keys) ficam em branco por padrão — defina no Easypanel
-# (Environment Variables do projeto) para usar valores reais. Quando
-# definidas, sobrepõem o default.
+version: "3.8"
 
 services:
-  # ==================== ADMIN PROFILE ====================
-  hermes-admin:
-    image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
-    command: ["-p", "admin"]
-    user: "0:0"
-    environment:
-      - ENTERPRISE_PROFILE=admin
-      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # Model config — NVIDIA NIM by default for admin
-      - MODEL_PROVIDER=${ADMIN_MODEL_PROVIDER:-nvidia}
-      - MODEL_NAME=${ADMIN_MODEL_NAME:-nvidia/nemotron-3-super-120b-a12b}
-      - MODEL_BASE_URL=${ADMIN_MODEL_BASE_URL:-https://integrate.api.nvidia.com/v1}
-      - AGENT_NAME=${ADMIN_AGENT_NAME:-Hermes}
-      # Postgres dedicado do Hermes (HERMES_PG_*) — dados operacionais do agente
-      - HERMES_PG_HOST=${HERMES_PG_HOST:-postgres}
-      - HERMES_PG_PORT=${HERMES_PG_PORT:-5432}
-      - HERMES_PG_DATABASE=${HERMES_PG_DATABASE:-hermes_enterprise}
-      - HERMES_PG_USER=${HERMES_PG_USER:-hermes}
-      - HERMES_PG_PASSWORD=${HERMES_PG_PASSWORD:-changeme123}
-      # Telegram
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      # Cesto d'Amore API (daily stats)
-      - CESTO_API_URL=${CESTO_API_URL:-https://api.cestodamore.com.br}
-      - CESTO_API_KEY=${CESTO_API_KEY:-}
-      - CESTO_API_EMAIL=${CESTO_API_EMAIL:-}
-      - CESTO_API_PASSWORD=${CESTO_API_PASSWORD:-}
-      # Cesto produção DB (read-only, resumo diário)
-      - CESTO_PROD_PG_HOST=${CESTO_PROD_PG_HOST:-}
-      - CESTO_PROD_PG_PORT=${CESTO_PROD_PG_PORT:-54320}
-      - CESTO_PROD_PG_DATABASE=${CESTO_PROD_PG_DATABASE:-cesto_damore}
-      - CESTO_PROD_PG_USER=${CESTO_PROD_PG_USER:-postgres}
-      - CESTO_PROD_PG_PASSWORD=${CESTO_PROD_PG_PASSWORD:-}
-      # WaHa (WhatsApp) for daily summary delivery
-      - WAHA_API_URL=${WAHA_API_URL:-https://cesto-damore-waha.ovtvje.easypanel.host/}
-      - WAHA_API_KEY=${WAHA_API_KEY:-}
-      - WAHA_INSTANCE=${WAHA_INSTANCE:-CestoDamore}
-      - WHATSAPP_GROUP_ID=${WHATSAPP_GROUP_ID:-}
-      # API Server
-      - API_SERVER_ENABLED=${ADMIN_API_SERVER_ENABLED:-true}
-      - API_SERVER_PORT=${ADMIN_API_SERVER_PORT:-8081}
-      - API_SERVER_HOST=${ADMIN_API_SERVER_HOST:-0.0.0.0}
-      - API_SERVER_KEY=${ADMIN_API_KEY:-changeme-admin-key}
-      - GATEWAY_ALLOW_ALL_USERS=${GATEWAY_ALLOW_ALL_USERS:-true}
-      # Dashboard
-      - DASHBOARD_ENABLED=${DASHBOARD_ENABLED:-true}
-      - DASHBOARD_PORT=${DASHBOARD_PORT:-9119}
-      - DASHBOARD_HOST=${DASHBOARD_HOST:-0.0.0.0}
-    volumes:
-      - hermes-admin-data:/home/hermes/.hermes/profiles/admin
-      # Managing Profile: Admin can read/write Ana's files at /managed/ana
-      - hermes-ana-profile:/managed/ana:rw
-    ports:
-      - "8081:8081"    # API Server
-      - "9119:9119"    # Dashboard
-    networks:
-      - hermes-enterprise
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 90s
-
-  # ==================== ATENDIMENTO PROFILE ====================
-  hermes-atendimento:
-    image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
-    command: ["-p", "atendimento"]
-    user: "0:0"
-    environment:
-      - ENTERPRISE_PROFILE=atendimento
-      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # Model config — OpenAI gpt-5-nano for Ana
-      - MODEL_PROVIDER=${ANA_MODEL_PROVIDER:-openai}
-      - MODEL_NAME=${ANA_MODEL_NAME:-gpt-5-nano}
-      - MODEL_BASE_URL=${ANA_MODEL_BASE_URL:-https://api.openai.com/v1}
-      - AGENT_NAME=${ANA_AGENT_NAME:-Ana}
-      # Postgres dedicado do Hermes (HERMES_PG_*) — dados operacionais do agente
-      - HERMES_PG_HOST=${HERMES_PG_HOST:-postgres}
-      - HERMES_PG_PORT=${HERMES_PG_PORT:-5432}
-      - HERMES_PG_DATABASE=${HERMES_PG_DATABASE:-hermes_enterprise}
-      - HERMES_PG_USER=${HERMES_PG_USER:-hermes}
-      - HERMES_PG_PASSWORD=${HERMES_PG_PASSWORD:-changeme123}
-      # API Server
-      - API_SERVER_ENABLED=${ANA_API_SERVER_ENABLED:-true}
-      - API_SERVER_PORT=${ANA_API_SERVER_PORT:-8082}
-      - API_SERVER_HOST=${ANA_API_SERVER_HOST:-0.0.0.0}
-      - API_SERVER_KEY=${ANA_API_KEY:-changeme-ana-key}
-      - GATEWAY_ALLOW_ALL_USERS=${GATEWAY_ALLOW_ALL_USERS:-true}
-    volumes:
-      # Shared with Admin (Managing Profile): Ana's profile lives here
-      - hermes-ana-profile:/home/hermes/.hermes/profiles/atendimento
-    ports:
-      - "8082:8082"    # API Server
-    networks:
-      - hermes-enterprise
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 90s
-
-  # ==================== POSTGRES ====================
   postgres:
     image: postgres:16-alpine
     environment:
-      - POSTGRES_DB=hermes_enterprise
-      - POSTGRES_USER=hermes
-      # Coupled to HERMES_PG_PASSWORD so both stay in sync
-      - POSTGRES_PASSWORD=${HERMES_PG_PASSWORD:-changeme123}
+      POSTGRES_USER: ${HERMES_PG_USER:-hermes}
+      POSTGRES_PASSWORD: ${HERMES_PG_PASSWORD:-hermes}
+      POSTGRES_DB: ${HERMES_PG_DATABASE:-hermes_enterprise}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    networks:
-      - hermes-enterprise
-    restart: unless-stopped
+    expose:
+      - "5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes_enterprise"]
+      test: ["CMD-SHELL", "pg_isready -U ${HERMES_PG_USER:-hermes} -d ${HERMES_PG_DATABASE:-hermes_enterprise}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    networks:
+      - hermes-enterprise-network
 
-  # ==================== REDIS ====================
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis-data:/data
-    networks:
-      - hermes-enterprise
-    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    expose:
+      - "6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - hermes-enterprise-network
+
+  hermes-admin:
+    image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
+    environment:
+      # --- Admin (NVIDIA) ---
+      ADMIN_API_SERVER_HOST: ${ADMIN_API_SERVER_HOST:-0.0.0.0}
+      ADMIN_API_SERVER_PORT: ${ADMIN_API_SERVER_PORT:-8081}
+      ADMIN_API_SERVER_ENABLED: ${ADMIN_API_SERVER_ENABLED:-true}
+      ADMIN_API_SERVER_KEY: ${ADMIN_API_SERVER_KEY:-changeme-admin-key}
+      ADMIN_DASHBOARD_PORT: ${ADMIN_DASHBOARD_PORT:-9119}
+      ADMIN_DASHBOARD_AUTH_TOKEN: ${ADMIN_DASHBOARD_AUTH_TOKEN:-changeme-admin-key}
+      ADMIN_MODEL: ${ADMIN_MODEL:-nvidia/nemotron-3-super-120b-a12b}
+      ADMIN_LLM_BACKEND: ${ADMIN_LLM_BACKEND:-openai}
+      ADMIN_OPENAI_API_KEY: ${ADMIN_OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}
+      ADMIN_OPENAI_BASE_URL: ${ADMIN_OPENAI_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      ADMIN_TEMPERATURE: ${ADMIN_TEMPERATURE:-0.7}
+      ADMIN_MAX_TOKENS: ${ADMIN_MAX_TOKENS:-4096}
+      ADMIN_SYSTEM_PROMPT: ${ADMIN_SYSTEM_PROMPT:-Você é o assistente de administração da loja Cesto.}
+      # --- Database ---
+      HERMES_PG_HOST: ${HERMES_PG_HOST:-postgres}
+      HERMES_PG_PORT: ${HERMES_PG_PORT:-5432}
+      HERMES_PG_DATABASE: ${HERMES_PG_DATABASE:-hermes_enterprise}
+      HERMES_PG_USER: ${HERMES_PG_USER:-hermes}
+      HERMES_PG_PASSWORD: ${HERMES_PG_PASSWORD:-hermes}
+      HERMES_PG_SSL: ${HERMES_PG_SSL:-false}
+      # --- Redis ---
+      HERMES_REDIS_HOST: ${HERMES_REDIS_HOST:-redis}
+      HERMES_REDIS_PORT: ${HERMES_REDIS_PORT:-6379}
+      HERMES_REDIS_PASSWORD: ${HERMES_REDIS_PASSWORD:-}
+      # --- Misc ---
+      HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-INFO}
+      HERMES_PROFILE_DIR: ${HERMES_PROFILE_DIR:-/home/hermes/.hermes}
+      HERMES_TUI: ${HERMES_TUI:-false}
+      HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
+    volumes:
+      - hermes-admin-data:/home/hermes/.hermes
+    expose:
+      - "8081"
+      - "9119"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+      interval: 30s
+      timeout: 10s
       retries: 3
+      start_period: 90s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - hermes-enterprise-network
+
+  hermes-atendimento:
+    image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
+    environment:
+      # --- Ana (OpenAI) ---
+      ANA_API_SERVER_HOST: ${ANA_API_SERVER_HOST:-0.0.0.0}
+      ANA_API_SERVER_PORT: ${ANA_API_SERVER_PORT:-8082}
+      ANA_API_SERVER_ENABLED: ${ANA_API_SERVER_ENABLED:-true}
+      ANA_API_SERVER_KEY: ${ANA_API_SERVER_KEY:-changeme-ana-key}
+      ANA_MODEL: ${ANA_MODEL:-gpt-5-nano}
+      ANA_LLM_BACKEND: ${ANA_LLM_BACKEND:-openai}
+      ANA_OPENAI_API_KEY: ${ANA_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}
+      ANA_OPENAI_BASE_URL: ${ANA_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      ANA_TEMPERATURE: ${ANA_TEMPERATURE:-0.7}
+      ANA_MAX_TOKENS: ${ANA_MAX_TOKENS:-4096}
+      ANA_SYSTEM_PROMPT: ${ANA_SYSTEM_PROMPT:-Você é a Ana, atendente virtual da loja Cesto.}
+      # --- Database ---
+      HERMES_PG_HOST: ${HERMES_PG_HOST:-postgres}
+      HERMES_PG_PORT: ${HERMES_PG_PORT:-5432}
+      HERMES_PG_DATABASE: ${HERMES_PG_DATABASE:-hermes_enterprise}
+      HERMES_PG_USER: ${HERMES_PG_USER:-hermes}
+      HERMES_PG_PASSWORD: ${HERMES_PG_PASSWORD:-hermes}
+      HERMES_PG_SSL: ${HERMES_PG_SSL:-false}
+      # --- Redis ---
+      HERMES_REDIS_HOST: ${HERMES_REDIS_HOST:-redis}
+      HERMES_REDIS_PORT: ${HERMES_REDIS_PORT:-6379}
+      HERMES_REDIS_PASSWORD: ${HERMES_REDIS_PASSWORD:-}
+      # --- Misc ---
+      HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-INFO}
+      HERMES_PROFILE_DIR: ${HERMES_PROFILE_DIR:-/home/hermes/.hermes}
+      HERMES_TUI: ${HERMES_TUI:-false}
+      HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
+    volumes:
+      - hermes-atendimento-data:/home/hermes/.hermes
+    expose:
+      - "8082"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - hermes-enterprise-network
 
 volumes:
-  hermes-admin-data:
-  hermes-ana-profile:
   postgres-data:
-  redis-data:
+  hermes-admin-data:
+  hermes-atendimento-data:
 
 networks:
-  hermes-enterprise:
+  hermes-enterprise-network:
     driver: bridge
-    name: hermes-enterprise-network
