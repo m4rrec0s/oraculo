@@ -224,6 +224,19 @@ api_server:
   enabled: true
 YAMLEOF
     else
+        # Generate dashboard auth hash for admin profile
+        ADMIN_DASH_USER="${ADMIN_DASHBOARD_USERNAME:-admin}"
+        ADMIN_DASH_PASS="${ADMIN_DASHBOARD_PASSWORD:-changeme}"
+        DASH_PASS_HASH=$(python3 << 'HERMES_DASH_AUTH'
+import os, sys
+try:
+    from plugins.dashboard_auth.basic import hash_password
+    print(hash_password(os.environ.get("ADMIN_DASHBOARD_PASSWORD", "changeme")))
+except Exception:
+    print("", file=sys.stderr)
+HERMES_DASH_AUTH
+        )
+
         cat > "${CONFIG_FILE}" << YAMLEOF
 # Hermes Enterprise — ${PROFILE} config
 
@@ -237,6 +250,11 @@ agent:
   name: ${AGENT_NAME:-Hermes}
   max_iterations: 15
   tool_use_enforcement: auto
+
+dashboard:
+  basic_auth:
+    username: ${ADMIN_DASH_USER}
+    password_hash: "${DASH_PASS_HASH}"
 
 gateway:
   platforms: []
