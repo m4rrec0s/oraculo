@@ -314,4 +314,4 @@ fi
 
 # ==================== 4. RUN ====================
 log "Starting Hermes gateway..."
-exec python -m hermes_cli.main gateway run "$@"
+exec python -m hermes_cli.main "$@" gateway run
