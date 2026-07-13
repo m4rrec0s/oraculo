@@ -1662,7 +1662,14 @@ def _ensure_tui_node() -> None:
 
     for extra in extras:
         s = str(extra)
-        if extra.is_dir() and s not in parts:
+        try:
+            extra_is_dir = extra.is_dir()
+        except OSError:
+            # Unreadable dir on PATH (e.g. /root/.local/bin when the process
+            # runs as a non-root user with HOME=/root). Skip it — never crash
+            # the TUI launch over a PATH entry we can't stat.
+            extra_is_dir = False
+        if extra_is_dir and s not in parts:
             parts.insert(0, s)
     os.environ["PATH"] = os.pathsep.join(parts)
 

@@ -577,12 +577,23 @@ def build_alias_map() -> dict[str, str]:
     """
     wrapper_dir = _get_wrapper_dir()
     result: dict[str, str] = {}
-    if not wrapper_dir.is_dir():
+    try:
+        wrapper_ok = wrapper_dir.is_dir()
+    except OSError:
+        # Unreadable wrapper dir (e.g. /root/.local/bin when running as a
+        # non-root user with HOME=/root). Treat as empty — never crash
+        # profile enumeration over a dir we can't stat.
+        wrapper_ok = False
+    if not wrapper_ok:
         return result
     is_windows = sys.platform == "win32"
     prefix = "hermes -p "
 
-    for entry in sorted(wrapper_dir.iterdir()):
+    try:
+        entries = sorted(wrapper_dir.iterdir())
+    except OSError:
+        return result
+    for entry in entries:
         if not entry.is_file():
             continue
         # Only our own wrappers are named with the alias and (on Windows) .bat.
