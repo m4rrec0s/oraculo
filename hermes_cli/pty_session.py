@@ -9,8 +9,11 @@ docs/superpowers/specs/2026-06-20-pty-keepalive-reattach-design.md.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Optional
+
+_log = logging.getLogger("hermes_cli.pty_session")
 
 WS_CLOSE_PROCESS_EXITED = 4410
 WS_CLOSE_SUPERSEDED = 4409
@@ -56,16 +59,24 @@ class PtySession:
 
     async def _drain(self) -> None:
         loop = asyncio.get_running_loop()
+        _log.info("PTY drain START pid=%s key=%s", self.bridge._proc.pid, self.key)
         while True:
-            chunk = await loop.run_in_executor(None, self.bridge.read, self._read_timeout)
+            try:
+                chunk = await loop.run_in_executor(None, self.bridge.read, self._read_timeout)
+            except Exception as exc:
+                _log.exception("PTY drain EXC pid=%s key=%s", self.bridge._proc.pid, self.key)
+                self.alive = False
+                return
             if chunk is None:                       # EOF — the agent process exited
                 self.alive = False
                 ws = self._ws
+                _log.info("PTY drain EOF pid=%s key=%s -> send 4410", self.bridge._proc.pid, self.key)
                 if ws is not None:
                     try:
                         await ws.close(code=WS_CLOSE_PROCESS_EXITED)
                     except Exception:
                         pass
+                _log.info("PTY drain RETURN pid=%s key=%s", self.bridge._proc.pid, self.key)
                 return
             if not chunk:                            # idle tick
                 await asyncio.sleep(0)
@@ -80,6 +91,7 @@ class PtySession:
 
     async def attach(self, ws) -> None:
         old = self._ws
+        _log.info("PTY attach key=%s old_superseded=%s", self.key, old is not None and old is not ws)
         if old is not None and old is not ws:
             try:
                 await old.close(code=WS_CLOSE_SUPERSEDED)
@@ -93,6 +105,7 @@ class PtySession:
             await ws.send_bytes(snap)
 
     def detach(self, ws) -> None:
+        _log.info("PTY detach key=%s", self.key)
         # Only the currently-attached socket may mark the session detached.
         # A superseded socket's handler also calls detach on its way out
         # (its ``finally`` runs after the new tab attached); flipping

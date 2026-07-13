@@ -4,15 +4,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${HERMES_PG_USER:-hermes}
-      POSTGRES_PASSWORD: ${HERMES_PG_PASSWORD:-hermes}
-      POSTGRES_DB: ${HERMES_PG_DATABASE:-hermes_enterprise}
+      POSTGRES_USER: ${HERMES_PG_USER}
+      POSTGRES_PASSWORD: ${HERMES_PG_PASSWORD}
+      POSTGRES_DB: ${HERMES_PG_DATABASE}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     expose:
       - "5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${HERMES_PG_USER:-hermes} -d ${HERMES_PG_DATABASE:-hermes_enterprise}"]
+      test: ["CMD-SHELL", "pg_isready -U ${HERMES_PG_USER} -d ${HERMES_PG_DATABASE}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -45,32 +45,32 @@ services:
       MODEL_NAME: nvidia/nemotron-3-super-120b-a12b
       MODEL_BASE_URL: https://integrate.api.nvidia.com/v1
       API_KEY_VAR: NVIDIA_API_KEY
-      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-${ADMIN_NVIDIA_API_KEY:-${ADMIN_OPENAI_API_KEY:-}}}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY}
       # --- API server (HTTP, Bearer API_SERVER_KEY) ---
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: "8081"
-      API_SERVER_KEY: ${ADMIN_API_SERVER_KEY:-changeme-admin-key}
+      API_SERVER_KEY: ${ADMIN_API_KEY}
       API_SERVER_CORS_ORIGINS: "*"
       # --- Dashboard ---
       DASHBOARD_ENABLED: "true"
       DASHBOARD_PORT: "9119"
       DASHBOARD_HOST: 0.0.0.0
       # --- Database ---
-      HERMES_PG_HOST: ${HERMES_PG_HOST:-postgres}
-      HERMES_PG_PORT: ${HERMES_PG_PORT:-5432}
-      HERMES_PG_DATABASE: ${HERMES_PG_DATABASE:-hermes_enterprise}
-      HERMES_PG_USER: ${HERMES_PG_USER:-hermes}
-      HERMES_PG_PASSWORD: ${HERMES_PG_PASSWORD:-hermes}
-      HERMES_PG_SSL: ${HERMES_PG_SSL:-false}
+      HERMES_PG_HOST: ${HERMES_PG_HOST}
+      HERMES_PG_PORT: ${HERMES_PG_PORT}
+      HERMES_PG_DATABASE: ${HERMES_PG_DATABASE}
+      HERMES_PG_USER: ${HERMES_PG_USER}
+      HERMES_PG_PASSWORD: ${HERMES_PG_PASSWORD}
+      HERMES_PG_SSL: ${HERMES_PG_SSL}
       # --- Redis ---
-      HERMES_REDIS_HOST: ${HERMES_REDIS_HOST:-redis}
-      HERMES_REDIS_PORT: ${HERMES_REDIS_PORT:-6379}
-      HERMES_REDIS_PASSWORD: ${HERMES_REDIS_PASSWORD:-}
+      HERMES_REDIS_HOST: ${HERMES_REDIS_HOST}
+      HERMES_REDIS_PORT: ${HERMES_REDIS_PORT}
+      HERMES_REDIS_PASSWORD: ${HERMES_REDIS_PASSWORD}
       # --- Misc ---
-      HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-INFO}
-      HERMES_TUI: ${HERMES_TUI:-false}
-      HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
+      HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL}
+      HERMES_TUI: ${HERMES_TUI}
+      HERMES_HEADLESS: ${HERMES_HEADLESS}
     volumes:
       - hermes-admin-data:/home/hermes/.hermes
     expose:
@@ -102,28 +102,28 @@ services:
       MODEL_NAME: gpt-5-nano
       MODEL_BASE_URL: https://api.openai.com/v1
       API_KEY_VAR: OPENAI_API_KEY
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-${ANA_OPENAI_API_KEY:-}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
       # --- API server (HTTP, Bearer API_SERVER_KEY) ---
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: "8082"
-      API_SERVER_KEY: ${ANA_API_SERVER_KEY:-changeme-ana-key}
+      API_SERVER_KEY: ${ANA_API_KEY}
       API_SERVER_CORS_ORIGINS: "*"
       # --- Database ---
-      HERMES_PG_HOST: ${HERMES_PG_HOST:-postgres}
-      HERMES_PG_PORT: ${HERMES_PG_PORT:-5432}
-      HERMES_PG_DATABASE: ${HERMES_PG_DATABASE:-hermes_enterprise}
-      HERMES_PG_USER: ${HERMES_PG_USER:-hermes}
-      HERMES_PG_PASSWORD: ${HERMES_PG_PASSWORD:-hermes}
-      HERMES_PG_SSL: ${HERMES_PG_SSL:-false}
+      HERMES_PG_HOST: ${HERMES_PG_HOST}
+      HERMES_PG_PORT: ${HERMES_PG_PORT}
+      HERMES_PG_DATABASE: ${HERMES_PG_DATABASE}
+      HERMES_PG_USER: ${HERMES_PG_USER}
+      HERMES_PG_PASSWORD: ${HERMES_PG_PASSWORD}
+      HERMES_PG_SSL: ${HERMES_PG_SSL}
       # --- Redis ---
-      HERMES_REDIS_HOST: ${HERMES_REDIS_HOST:-redis}
-      HERMES_REDIS_PORT: ${HERMES_REDIS_PORT:-6379}
-      HERMES_REDIS_PASSWORD: ${HERMES_REDIS_PASSWORD:-}
+      HERMES_REDIS_HOST: ${HERMES_REDIS_HOST}
+      HERMES_REDIS_PORT: ${HERMES_REDIS_PORT}
+      HERMES_REDIS_PASSWORD: ${HERMES_REDIS_PASSWORD}
       # --- Misc ---
-      HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-INFO}
-      HERMES_TUI: ${HERMES_TUI:-false}
-      HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
+      HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL}
+      HERMES_TUI: ${HERMES_TUI}
+      HERMES_HEADLESS: ${HERMES_HEADLESS}
     volumes:
       - hermes-atendimento-data:/home/hermes/.hermes
     expose:

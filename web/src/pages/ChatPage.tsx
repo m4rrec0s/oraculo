@@ -891,6 +891,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       const attempt = Math.min(reconnectAttemptRef.current + 1, 5);
       reconnectAttemptRef.current = attempt;
       const delayMs = Math.min(250 * 2 ** (attempt - 1), 3000);
+      console.log("[chat] PTY scheduleReconnect attempt=", attempt, "code=", code, "delay=", delayMs);
       setBanner(null);
       setLastCloseCode(code);
       setPtyState("reconnecting");
@@ -914,6 +915,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       if (scopedProfile) params.profile = scopedProfile;
       const url = await api.buildWsUrl("/api/pty", params);
       const ws = new WebSocket(url);
+      console.log("[chat] PTY ws create url=", url);
       ws.binaryType = "arraybuffer";
       wsRef.current = ws;
       // W2 (NS-591): a mobile socket can wedge in CONNECTING after a radio
@@ -933,6 +935,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       }, PTY_CONNECTING_TIMEOUT_MS);
 
     ws.onopen = () => {
+      console.log("[chat] PTY onopen attach=", ptyAttachToken(forceFresh));
       clearReconnectTimer();
       clearConnectingTimer();
       connectInFlightRef.current = false;
@@ -972,12 +975,26 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       }
     };
 
+    let _firstPtyFrame = true;
     ws.onmessage = (ev) => {
+      if (_firstPtyFrame) {
+        _firstPtyFrame = false;
+        console.log(
+          "[chat] PTY first frame len=",
+          typeof ev.data === "string"
+            ? ev.data.length
+            : (ev.data as ArrayBuffer).byteLength,
+        );
+      }
       if (typeof ev.data === "string") {
         term.write(ev.data);
       } else {
         term.write(new Uint8Array(ev.data as ArrayBuffer));
       }
+    };
+
+    ws.onerror = (ev) => {
+      console.warn("[chat] PTY onerror", ev);
     };
 
     ws.onclose = (ev) => {
@@ -992,7 +1009,9 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       // The server sends a machine-parseable reason on every rejection (see
       // pty_ws in web_server.py); echo it verbatim alongside the close code.
       const why = ev.reason ? ` reason=${ev.reason}` : "";
-      console.warn(`[chat] PTY WebSocket closed code=${ev.code}${why}`);
+      console.warn(
+        `[chat] PTY WebSocket closed code=${ev.code} wasClean=${ev.wasClean} attach=${ptyAttachToken(forceFresh)}${why}`,
+      );
       setLastCloseCode(ev.code);
       if (ev.code === 4401) {
         setPtyState("closed");
@@ -1124,6 +1143,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     term.focus();
 
     return () => {
+      console.log("[chat] PTY effect cleanup unmounting=", unmounting, "wsState=", wsRef.current?.readyState);
       unmounting = true;
       imageUploadDisposed = true;
       syncMetricsRef.current = null;

@@ -15500,6 +15500,16 @@ async def console_ws(ws: WebSocket) -> None:
 async def pty_ws(ws: WebSocket) -> None:
     peer = ws.client.host if ws.client else "?"
 
+    _log.info(
+        "PTY ws START peer=%s channel=%s profile=%s attach=%s resume=%s fresh=%s",
+        peer,
+        ws.query_params.get("channel"),
+        ws.query_params.get("profile"),
+        ws.query_params.get("attach"),
+        ws.query_params.get("resume"),
+        ws.query_params.get("fresh"),
+    )
+
     if not _DASHBOARD_EMBEDDED_CHAT_ENABLED:
         _log.info("pty refused: embedded chat disabled peer=%s", peer)
         await ws.close(code=4404, reason="embedded chat disabled")
@@ -15533,6 +15543,7 @@ async def pty_ws(ws: WebSocket) -> None:
         await ws.close(code=4408, reason=_ws_close_reason(client_reason))
         return
 
+    _log.info("PTY pre-accept cred=%s mode=%s", cred, mode)
     await ws.accept()
     _log.info("pty accepted peer=%s mode=%s cred=%s", peer, mode, cred)
 
@@ -15589,12 +15600,18 @@ async def pty_ws(ws: WebSocket) -> None:
         await ws.send_text(f"\r\n\x1b[31mChat unavailable: {exc}\x1b[0m\r\n")
         await ws.close(code=1011)
         return
-
+    except Exception as exc:
+        # Catch anything else (e.g. PermissionError from profile enumeration)
+        # that would otherwise crash pty_ws after accept -> abnormal WS close.
+        _log.exception("PTY argv resolve EXC peer=%s", peer)
+        raise
 
     attach_token = ws.query_params.get("attach") or None
 
     def _spawn():
-        return PtyBridge.spawn(argv, cwd=cwd, env=env)
+        bridge = PtyBridge.spawn(argv, cwd=cwd, env=env)
+        _log.info("PTY spawned pid=%s key=%s", bridge._proc.pid, attach_token)
+        return bridge
 
     if attach_token is None:
         # Legacy path: 1:1 socket<->PTY, killed on disconnect (unchanged).
@@ -15633,6 +15650,7 @@ async def pty_ws(ws: WebSocket) -> None:
     # attached and rings-buffers it while detached.  On child EOF the drain
     # closes the attached socket with 4410, which unparks ``ws.receive()``
     # below — same half-open-socket protection the legacy pump has (#54028).
+    _log.info("PTY writer START key=%s", attach_token)
     try:
         while True:
             try:
@@ -15660,6 +15678,25 @@ async def pty_ws(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        _child_alive = "n/a"
+        for _obj in (locals().get("session"), locals().get("bridge")):
+            if not _obj:
+                continue
+            _br = getattr(_obj, "bridge", _obj)
+            _pr = getattr(_br, "_proc", None)
+            if _pr is not None:
+                try:
+                    _child_alive = _pr.poll() is None
+                except Exception:
+                    _child_alive = "unknown"
+                break
+        _log.info(
+            "PTY ws FINALLY key=%s code=%s reason=%s child_alive=%s",
+            attach_token,
+            getattr(ws, "close_code", None),
+            getattr(ws, "close_reason", None),
+            _child_alive,
+        )
         # Detach only — the PTY keeps running for a reattach; the registry
         # reaper closes it after the TTL (or immediately on process exit).
         PTY_REGISTRY.detach(attach_token, ws)
