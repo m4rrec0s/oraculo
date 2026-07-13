@@ -338,6 +338,18 @@ async def gated_auth_middleware(
                 if unreachable_provider is None:
                     unreachable_provider = provider.name
                 continue
+            except Exception as e:  # noqa: BLE001 — a buggy provider must not 500 the gate
+                _log.warning(
+                    "dashboard-auth: provider %r raised during verify_session: %s",
+                    provider.name, e,
+                )
+                audit_log(
+                    AuditEvent.SESSION_VERIFY_FAILURE,
+                    provider=provider.name,
+                    reason="provider_error",
+                    ip=_client_ip(request),
+                )
+                continue
             if session is not None:
                 break
         if session is None and unreachable_provider is not None:
