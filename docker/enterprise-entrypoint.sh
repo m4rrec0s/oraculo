@@ -147,6 +147,18 @@ export PATH="${HERMES_HOME_BASE}/.local/bin:${PATH}"
 log "HERMES_HOME: ${MAGENTA}${HERMES_HOME}${NC}"
 
 # ==================== 3. GENERATE CONFIG ====================
+# Config is written once on first start. If MODEL_PROVIDER/MODEL_NAME change
+# later (e.g. nvidia -> openai), the stale config would keep the old provider
+# and every request would fail auth (No usable credentials for 'nvidia').
+# Regenerate when the recorded model.default no longer matches the env model.
+if [[ -f "${CONFIG_FILE}" ]]; then
+  _cfg_default=$(grep -E '^  default:' "${CONFIG_FILE}" | head -1 | sed 's/.*default:[[:space:]]*//' | tr -d '"' || true)
+  if [[ "${_cfg_default}" != "${MODEL_NAME}" ]]; then
+    warn "Model env changed (config: '${_cfg_default}', env: '${MODEL_NAME}') — regenerating config"
+    rm -f "${CONFIG_FILE}"
+  fi
+fi
+
 if [[ ! -f "${CONFIG_FILE}" ]]; then
     log "Generating config for ${PROFILE}..."
     mkdir -p "$(dirname "${CONFIG_FILE}")"
