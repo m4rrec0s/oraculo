@@ -22,7 +22,7 @@ services:
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: "8081"
-      API_SERVER_KEY: ${ADMIN_API_KEY:-admin-dev-key}
+      API_SERVER_KEY: ${API_SERVER_KEY}
       API_SERVER_CORS_ORIGINS: "*"
       # --- Dashboard ---
       DASHBOARD_ENABLED: "true"
@@ -101,7 +101,7 @@ services:
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: "8082"
-      API_SERVER_KEY: ${ANA_API_KEY:-ana-dev-key}
+      API_SERVER_KEY: ${API_SERVER_KEY}
       API_SERVER_CORS_ORIGINS: "*"
       # --- Dashboard desabilitado ---
       DASHBOARD_ENABLED: "false"
