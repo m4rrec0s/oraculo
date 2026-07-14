@@ -1,0 +1,180 @@
+# ============================================================================
+# Docker Compose for Local Development
+#
+# This configuration includes PostgreSQL and Redis for local testing.
+# Use this when developing locally without Easypanel.
+#
+# USAGE:
+#   docker-compose -f docker-compose.dev.yml up -d
+#
+# ============================================================================
+
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${HERMES_PG_USER:-hermes}
+      POSTGRES_PASSWORD: ${HERMES_PG_PASSWORD:-local-dev-password}
+      POSTGRES_DB: ${HERMES_PG_DATABASE:-hermes}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${HERMES_PG_USER:-hermes} -d ${HERMES_PG_DATABASE:-hermes}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hermes-enterprise-network
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - hermes-enterprise-network
+
+  hermes-admin:
+    image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # --- Profile selection (entrypoint reads ENTERPRISE_PROFILE) ---
+      ENTERPRISE_PROFILE: admin
+      AGENT_NAME: Hermes
+      # --- Admin model: NVIDIA Nemotron ---
+      MODEL_PROVIDER: nvidia
+      MODEL_NAME: nvidia/nemotron-3-super-120b-a12b
+      MODEL_BASE_URL: https://integrate.api.nvidia.com/v1
+      API_KEY_VAR: NVIDIA_API_KEY
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY}
+      # --- API server (HTTP, Bearer API_SERVER_KEY) ---
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: 0.0.0.0
+      API_SERVER_PORT: "8081"
+      API_SERVER_KEY: ${ADMIN_API_KEY:-local-dev-key}
+      API_SERVER_CORS_ORIGINS: "*"
+      # --- Dashboard ---
+      DASHBOARD_ENABLED: "true"
+      DASHBOARD_PORT: "9119"
+      DASHBOARD_HOST: 0.0.0.0
+      # --- Database (local postgres) ---
+      HERMES_PG_HOST: postgres
+      HERMES_PG_PORT: 5432
+      HERMES_PG_DATABASE: ${HERMES_PG_DATABASE:-hermes}
+      HERMES_PG_USER: ${HERMES_PG_USER:-hermes}
+      HERMES_PG_PASSWORD: ${HERMES_PG_PASSWORD:-local-dev-password}
+      HERMES_PG_SSL: "false"
+      # --- Redis (local redis) ---
+      HERMES_REDIS_HOST: redis
+      HERMES_REDIS_PORT: 6379
+      HERMES_REDIS_PASSWORD: ""
+      # --- Misc ---
+      HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-DEBUG}
+      HERMES_TUI: ${HERMES_TUI:-false}
+      HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
+      HOME: /home/hermes
+    working_dir: /home/hermes
+    volumes:
+      - hermes-admin-data:/home/hermes/.hermes
+      - ./enterprise:/app/enterprise
+      - ./docker:/app/docker
+      - ./scripts:/app/scripts
+    ports:
+      - "8081:8081"
+      - "9119:9119"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - hermes-enterprise-network
+
+  hermes-atendimento:
+    image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # --- Profile selection (entrypoint reads ENTERPRISE_PROFILE) ---
+      ENTERPRISE_PROFILE: atendimento
+      AGENT_NAME: Ana
+      # --- Ana model: OpenAI gpt-5-nano ---
+      MODEL_PROVIDER: openai
+      MODEL_NAME: gpt-5-nano
+      MODEL_BASE_URL: https://api.openai.com/v1
+      API_KEY_VAR: OPENAI_API_KEY
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # --- API server (HTTP, Bearer API_SERVER_KEY) ---
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: 0.0.0.0
+      API_SERVER_PORT: "8082"
+      API_SERVER_KEY: ${ANA_API_KEY:-local-dev-key}
+      API_SERVER_CORS_ORIGINS: "*"
+      # --- Database (local postgres) ---
+      HERMES_PG_HOST: postgres
+      HERMES_PG_PORT: 5432
+      HERMES_PG_DATABASE: ${HERMES_PG_DATABASE:-hermes}
+      HERMES_PG_USER: ${HERMES_PG_USER:-hermes}
+      HERMES_PG_PASSWORD: ${HERMES_PG_PASSWORD:-local-dev-password}
+      HERMES_PG_SSL: "false"
+      # --- Redis (local redis) ---
+      HERMES_REDIS_HOST: redis
+      HERMES_REDIS_PORT: 6379
+      HERMES_REDIS_PASSWORD: ""
+      # --- Misc ---
+      HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-DEBUG}
+      HERMES_TUI: ${HERMES_TUI:-false}
+      HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
+      HOME: /home/hermes
+    working_dir: /home/hermes
+    volumes:
+      - hermes-atendimento-data:/home/hermes/.hermes
+      - ./enterprise:/app/enterprise
+      - ./docker:/app/docker
+      - ./scripts:/app/scripts
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - hermes-enterprise-network
+
+volumes:
+  postgres-data:
+  hermes-admin-data:
+  hermes-atendimento-data:
+
+networks:
+  hermes-enterprise-network:
+    driver: bridge

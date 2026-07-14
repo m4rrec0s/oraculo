@@ -20,7 +20,9 @@
     "audit:tui": "npm audit --workspace ui-tui",
     "audit:fix:root": "npm audit fix --workspaces=false",
     "audit:fix:web": "npm audit fix --workspace web",
-    "audit:fix:tui": "npm audit fix --workspace ui-tui"
+    "audit:fix:tui": "npm audit fix --workspace ui-tui",
+    "provision:easypanel": "npx tsx scripts/easypanel-provision.ts",
+    "provision:easypanel:dry-run": "EASYPANEL_DRY_RUN=1 npx tsx scripts/easypanel-provision.ts"
   },
   "repository": {
     "type": "git",
