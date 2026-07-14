@@ -38,15 +38,17 @@ if [[ -n "${DATABASE_URL:-}" ]]; then
   # Extract components from DATABASE_URL
   # Format: postgresql://user:password@host:port/database
   # Regex: scheme://user:password@host:port/database (password can contain special chars)
-  if [[ $DATABASE_URL =~ ^postgresql://([^:]+):(.+)@([^:]+):([0-9]+)/(.+)$ ]]; then
-    export HERMES_PG_USER="${BASH_REMATCH[1]}"
-    export HERMES_PG_PASSWORD="${BASH_REMATCH[2]}"
-    export HERMES_PG_HOST="${BASH_REMATCH[3]}"
-    export HERMES_PG_PORT="${BASH_REMATCH[4]}"
-    export HERMES_PG_DATABASE="${BASH_REMATCH[5]}"
+  if [[ $DATABASE_URL =~ ^(postgresql|postgres)://([^:]+):(.+?)@([^:]+):([0-9]+)/([^\?]+)(\?.*)?$ ]]; then
+    export HERMES_PG_USER="${BASH_REMATCH[2]}"
+    export HERMES_PG_PASSWORD="${BASH_REMATCH[3]}"
+    export HERMES_PG_HOST="${BASH_REMATCH[4]}"
+    export HERMES_PG_PORT="${BASH_REMATCH[5]}"
+    export HERMES_PG_DATABASE="${BASH_REMATCH[6]}"
     ok "DATABASE_URL parsed: user=$HERMES_PG_USER, host=$HERMES_PG_HOST:$HERMES_PG_PORT, db=$HERMES_PG_DATABASE"
   else
-    warn "DATABASE_URL format invalid (expected: postgresql://user:password@host:port/database), using HERMES_PG_* vars if available"
+    warn "DATABASE_URL format invalid (expected: postgresql://user:password@host:port/database)"
+    warn "DATABASE_URL value: $DATABASE_URL"
+    warn "Using HERMES_PG_* vars if available"
   fi
 fi
 
@@ -55,13 +57,14 @@ if [[ -n "${REDIS_URL:-}" ]]; then
   log "Parsing REDIS_URL..."
   # Extract components from REDIS_URL
   # Format: redis://:password@host:port or redis://host:port
-  if [[ $REDIS_URL =~ ^redis://(:)?([^@]*)@([^:]+):(.+)$ ]]; then
-    # Has password
+  # Format: redis://[username]:password@host:port or redis://host:port
+  if [[ $REDIS_URL =~ ^redis://([^:/@]+)?:?(.+?)@([^:]+):([0-9]+)$ ]]; then
+    # Has password (and possibly username)
     export HERMES_REDIS_PASSWORD="${BASH_REMATCH[2]}"
     export HERMES_REDIS_HOST="${BASH_REMATCH[3]}"
     export HERMES_REDIS_PORT="${BASH_REMATCH[4]}"
     ok "REDIS_URL parsed (with password): host=$HERMES_REDIS_HOST:$HERMES_REDIS_PORT"
-  elif [[ $REDIS_URL =~ ^redis://([^:]+):(.+)$ ]]; then
+  elif [[ $REDIS_URL =~ ^redis://([^:]+):([0-9]+)$ ]]; then
     # No password
     export HERMES_REDIS_HOST="${BASH_REMATCH[1]}"
     export HERMES_REDIS_PORT="${BASH_REMATCH[2]}"
