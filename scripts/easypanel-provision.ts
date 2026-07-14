@@ -15,6 +15,10 @@ import * as fs from "fs";
 import * as path from "path";
 
 // ============================================================================
+// NOTE: .env is loaded automatically via `node -r dotenv/config` in package.json
+// ============================================================================
+
+// ============================================================================
 // TYPES
 // ============================================================================
 
@@ -76,6 +80,12 @@ function logError(message: string): void {
   console.error(`[ERROR] ${message}`);
 }
 
+function logDebug(message: string): void {
+  if (process.env.DEBUG_EASYPANEL) {
+    console.log(`[DEBUG] ${message}`);
+  }
+}
+
 async function trpcCall(
   config: EasypanelConfig,
   procedure: string,
@@ -99,8 +109,33 @@ async function trpcCall(
       throw new Error(`tRPC error (${response.status}): ${errorText}`);
     }
 
-    const data = await response.json() as { result: { data: unknown } };
-    return data.result.data;
+    const data = await response.json() as unknown;
+    logDebug(`Response from ${procedure}: ${JSON.stringify(data).slice(0, 200)}`);
+    
+    // Handle different response formats from tRPC API
+    // Format 1: { result: { data: ... } }
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      "result" in data &&
+      typeof (data as Record<string, unknown>).result === "object" &&
+      (data as Record<string, unknown>).result !== null &&
+      "data" in ((data as Record<string, unknown>).result as Record<string, unknown>)
+    ) {
+      const result = ((data as Record<string, unknown>).result as Record<string, unknown>).data;
+      logDebug(`Returning nested data from ${procedure}`);
+      return result;
+    }
+    
+    // Format 2: Direct response (for some endpoints)
+    if (typeof data === "object" && data !== null) {
+      logDebug(`Returning direct response from ${procedure}`);
+      return data;
+    }
+    
+    // Fallback
+    logDebug(`Returning raw response from ${procedure}`);
+    return data;
   } catch (error) {
     throw new Error(
       `tRPC call failed: ${procedure}. Details: ${error instanceof Error ? error.message : String(error)}`
@@ -116,15 +151,28 @@ async function ensureProject(config: EasypanelConfig): Promise<string> {
   log(`Checking if project '${config.projectName}' exists...`);
 
   try {
-    const projects = await trpcCall(config, "projects.listProjects", {}) as Array<{
-      id: string;
-      name: string;
-    }>;
+    const response = await trpcCall(config, "projects.listProjects", {}) as unknown;
+    
+    // Handle different response formats
+    let projects: Array<{ id?: string; name: string }> = [];
+    
+    if (Array.isArray(response)) {
+      projects = response;
+    } else if (
+      typeof response === "object" &&
+      response !== null &&
+      "json" in response &&
+      Array.isArray((response as Record<string, unknown>).json)
+    ) {
+      projects = (response as Record<string, unknown>).json as Array<{ id?: string; name: string }>;
+    }
+    
     const existing = projects.find((p) => p.name === config.projectName);
 
     if (existing) {
-      log(`✓ Project '${config.projectName}' already exists (ID: ${existing.id})`);
-      return existing.id;
+      const projectId = existing.id || config.projectName; // Fallback to name if no ID
+      log(`✓ Project '${config.projectName}' already exists (ID: ${projectId})`);
+      return projectId;
     }
   } catch (error) {
     log(`Warning: Could not list projects. Attempting to create new one. Details: ${error instanceof Error ? error.message : String(error)}`);
@@ -144,81 +192,74 @@ async function ensurePostgres(
   config: EasypanelConfig,
   projectId: string
 ): Promise<{ serviceId: string; password: string; host: string }> {
-  log("Checking if PostgreSQL service exists...");
-
-  const services = await trpcCall(config, "services.listServicesByProject", {
-    projectId,
-  }) as Array<{ id: string; name: string; type: string }>;
-
-  const existing = services.find((s) => s.type === "postgres");
-  if (existing) {
-    log(`✓ PostgreSQL service already exists (ID: ${existing.id})`);
-    // Note: we can't retrieve the password after creation, so we log a warning
-    log("⚠️  Service already exists. If this is first run, note the password displayed in Easypanel UI.");
-    return {
-      serviceId: existing.id,
-      password: "",
-      host: `${config.projectName}_postgres`,
-    };
-  }
+  log("Creating PostgreSQL service...");
 
   const password = generateSecurePassword();
-  log(`Creating PostgreSQL service with auto-generated password (${maskToken(password)})...`);
+  log(`Generating secure password: ${maskToken(password)}`);
 
-  const postgres = await trpcCall(config, "services.createPostgresService", {
-    projectId,
-    name: "postgres",
-    password,
-    rootUser: "postgres",
-    databaseName: "hermes",
-    version: "16",
-  }) as { id: string };
+  try {
+    const postgres = await trpcCall(config, "services.postgres.createService", {
+      projectName: config.projectName,
+      serviceName: "postgres",
+      password,
+      rootUser: "postgres",
+      databaseName: "hermes",
+      version: "16",
+    }) as { id: string };
 
-  log(`✓ PostgreSQL created (ID: ${postgres.id})`);
-  return {
-    serviceId: postgres.id,
-    password,
-    host: `${config.projectName}_postgres`,
-  };
+    log(`✓ PostgreSQL created (ID: ${postgres.id})`);
+    return {
+      serviceId: postgres.id,
+      password,
+      host: `${config.projectName}_postgres`,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("already exists")) {
+      log(`✓ PostgreSQL service already exists`);
+      return {
+        serviceId: "postgres",
+        password: "",
+        host: `${config.projectName}_postgres`,
+      };
+    }
+    throw error;
+  }
 }
 
 async function ensureRedis(
   config: EasypanelConfig,
   projectId: string
 ): Promise<{ serviceId: string; password: string; host: string }> {
-  log("Checking if Redis service exists...");
-
-  const services = await trpcCall(config, "services.listServicesByProject", {
-    projectId,
-  }) as Array<{ id: string; name: string; type: string }>;
-
-  const existing = services.find((s) => s.type === "redis");
-  if (existing) {
-    log(`✓ Redis service already exists (ID: ${existing.id})`);
-    log("⚠️  Service already exists. If this is first run, note the password displayed in Easypanel UI.");
-    return {
-      serviceId: existing.id,
-      password: "",
-      host: `${config.projectName}_redis`,
-    };
-  }
+  log("Creating Redis service...");
 
   const password = generateSecurePassword();
-  log(`Creating Redis service with auto-generated password (${maskToken(password)})...`);
+  log(`Generating secure password: ${maskToken(password)}`);
 
-  const redis = await trpcCall(config, "services.createRedisService", {
-    projectId,
-    name: "redis",
-    password,
-    version: "7",
-  }) as { id: string };
+  try {
+    const redis = await trpcCall(config, "services.redis.createService", {
+      projectName: config.projectName,
+      serviceName: "redis",
+      password,
+      version: "7",
+    }) as { id: string };
 
-  log(`✓ Redis created (ID: ${redis.id})`);
-  return {
-    serviceId: redis.id,
-    password,
-    host: `${config.projectName}_redis`,
-  };
+    log(`✓ Redis created (ID: ${redis.id})`);
+    return {
+      serviceId: redis.id,
+      password,
+      host: `${config.projectName}_redis`,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("already exists")) {
+      log(`✓ Redis service already exists`);
+      return {
+        serviceId: "redis",
+        password: "",
+        host: `${config.projectName}_redis`,
+      };
+    }
+    throw error;
+  }
 }
 
 async function ensureApp(
@@ -230,18 +271,6 @@ async function ensureApp(
   postgresHost: string,
   redisHost: string
 ): Promise<string> {
-  log(`Checking if app '${appName}' exists...`);
-
-  const services = await trpcCall(config, "services.listServicesByProject", {
-    projectId,
-  }) as Array<{ id: string; name: string }>;
-
-  const existing = services.find((s) => s.name === appName);
-  if (existing) {
-    log(`✓ App '${appName}' already exists (ID: ${existing.id})`);
-    return existing.id;
-  }
-
   log(`Creating app '${appName}'...`);
 
   const environment: Record<string, string> = {
@@ -264,23 +293,77 @@ async function ensureApp(
     }),
   };
 
-  const app = await trpcCall(config, "services.createApplicationService", {
-    projectId,
-    name: appName,
-    image: "ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest",
-    ports: [
-      {
-        container: 8000,
-        host: appName === "hermes-admin" ? 8001 : 8002,
-        protocol: "http",
-      },
-    ],
-    environment,
-    restartPolicy: "unless-stopped",
-  }) as { id: string };
+  // 1. Create app service
+  let serviceId = "";
+  
+  try {
+    const appResponse = await trpcCall(config, "services.app.createService", {
+      projectName: config.projectName,
+      serviceName: appName,
+    }) as unknown;
+    
+    logDebug(`App response: ${JSON.stringify(appResponse)}`);
+    
+    // Extract service ID from response (could be nested)
+    if (typeof appResponse === "object" && appResponse !== null) {
+      if ("id" in appResponse) {
+        serviceId = (appResponse as Record<string, unknown>).id as string;
+      } else if ("serviceId" in appResponse) {
+        serviceId = (appResponse as Record<string, unknown>).serviceId as string;
+      } else if ("_id" in appResponse) {
+        serviceId = (appResponse as Record<string, unknown>)._id as string;
+      } else {
+        // Fallback: use serviceName as ID
+        serviceId = appName;
+      }
+    }
+    
+    log(`✓ App service created (ID: ${serviceId})`);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("already exists")) {
+      log(`✓ App '${appName}' already exists`);
+      serviceId = appName;
+    } else {
+      throw error;
+    }
+  }
 
-  log(`✓ App '${appName}' created (ID: ${app.id})`);
-  return app.id;
+  // 2. Set source image
+  log(`Setting Docker image...`);
+  await trpcCall(config, "services.app.updateSourceImage", {
+    projectName: config.projectName,
+    serviceName: appName,
+    image: "ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest",
+  });
+  log(`✓ Docker image set`);
+
+  // 3. TODO: Set environment variables
+  // Note: Endpoint name unknown. Will need to be discovered via API inspection
+  // try {
+  //   log(`Setting environment variables...`);
+  //   await trpcCall(config, "services.app.setEnvironment", {
+  //     projectName: config.projectName,
+  //     serviceName: appName,
+  //     env: Object.entries(environment).map(([key, value]) => ({ key, value })),
+  //   });
+  //   log(`✓ Environment variables set`);
+  // } catch (error) {
+  //   log(`Warning: Could not set environment variables: ${error instanceof Error ? error.message : String(error)}`);
+  // }
+
+  // 4. TODO: Deploy service
+  // Note: Endpoint name unknown. Will need to be discovered via API inspection
+  // log(`Deploying service...`);
+  // await trpcCall(config, "services.app.deploy", {
+  //   projectName: config.projectName,
+  //   serviceName: appName,
+  // });
+  // log(`✓ App '${appName}' deployed`);
+
+  log(`✓ App '${appName}' configured (ID: ${serviceId})`);
+  log(`Note: To complete deployment, set environment variables and deploy via Easypanel UI`);
+
+  return serviceId;
 }
 
 // ============================================================================

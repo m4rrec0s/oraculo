@@ -50,3 +50,24 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+
+      - name: Trigger Easypanel autodeploy
+        if: success()
+        run: |
+          echo "🚀 Triggering Easypanel autodeploy webhooks..."
+          
+          # Admin autodeploy
+          echo "Deploying hermes-admin..."
+          curl -X POST \
+            -w "\nHTTP Status: %{http_code}\n" \
+            "http://185.205.246.213:3000/api/deploy/3a4abf2c67756fd6712e642f95b43e3afaeb69447b1d73a2" || echo "⚠️ Admin webhook failed (non-fatal)"
+          
+          sleep 2
+          
+          # Atendimento autodeploy
+          echo "Deploying hermes-atendimento..."
+          curl -X POST \
+            -w "\nHTTP Status: %{http_code}\n" \
+            "http://185.205.246.213:3000/api/deploy/ce1d1e068927681fce50e871683c48aa77bc87a4d47312ee" || echo "⚠️ Atendimento webhook failed (non-fatal)"
+          
+          echo "✅ Autodeploy triggers sent"
