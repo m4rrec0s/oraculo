@@ -33,7 +33,8 @@ COPY enterprise/ ./enterprise/
 
 # Instalar dependências Python via uv (mais rápido)
 RUN pip install --no-cache-dir uv && \
-    uv pip install --system --no-cache -r pyproject.toml
+    uv pip install --system --no-cache -r pyproject.toml && \
+    uv pip install --system --no-cache structlog pydantic_settings
 
 # ==================== RUNTIME ====================
 FROM base AS runtime
