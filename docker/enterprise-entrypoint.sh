@@ -37,7 +37,8 @@ if [[ -n "${DATABASE_URL:-}" ]]; then
   log "Parsing DATABASE_URL..."
   # Extract components from DATABASE_URL
   # Format: postgresql://user:password@host:port/database
-  if [[ $DATABASE_URL =~ ^postgresql://([^:]+):([^@]+)@([^:]+):([^/]+)/(.+)$ ]]; then
+  # Regex: scheme://user:password@host:port/database (password can contain special chars)
+  if [[ $DATABASE_URL =~ ^postgresql://([^:]+):(.+)@([^:]+):([0-9]+)/(.+)$ ]]; then
     export HERMES_PG_USER="${BASH_REMATCH[1]}"
     export HERMES_PG_PASSWORD="${BASH_REMATCH[2]}"
     export HERMES_PG_HOST="${BASH_REMATCH[3]}"
@@ -45,7 +46,7 @@ if [[ -n "${DATABASE_URL:-}" ]]; then
     export HERMES_PG_DATABASE="${BASH_REMATCH[5]}"
     ok "DATABASE_URL parsed: user=$HERMES_PG_USER, host=$HERMES_PG_HOST:$HERMES_PG_PORT, db=$HERMES_PG_DATABASE"
   else
-    warn "DATABASE_URL format invalid, using HERMES_PG_* vars if available"
+    warn "DATABASE_URL format invalid (expected: postgresql://user:password@host:port/database), using HERMES_PG_* vars if available"
   fi
 fi
 
@@ -89,7 +90,10 @@ pip install --quiet aiohttp 2>/dev/null && ok "aiohttp installed" || warn "aioht
 # ==================== 1b. ANA SESSIONS SCHEMA (Hermes PG dedicado) ====================
 # Cria ana_sessions / ana_messages no Postgres dedicado do Hermes (HERMES_PG_*).
 # Idempotente (CREATE IF NOT EXISTS). Roda em admin E atendimento.
-if [[ -n "${HERMES_PG_HOST:-}" ]]; then
+# Skip if SKIP_ANA_SCHEMA=true (para evitar race condition com múltiplos containers)
+if [[ "${SKIP_ANA_SCHEMA:-}" == "true" ]]; then
+  log "Skipping ana schema ensure (SKIP_ANA_SCHEMA=true)"
+elif [[ -n "${HERMES_PG_HOST:-}" ]]; then
   log "Ensuring Ana sessions schema on ${HERMES_PG_HOST}..."
   ensured=0
   for i in $(seq 1 18); do
