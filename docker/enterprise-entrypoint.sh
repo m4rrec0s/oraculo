@@ -425,6 +425,60 @@ if [ -f /home/hermes/.profile ] && ! grep -q "HERMES_HOME=${PROFILE_HOME}" /home
     echo "export HERMES_HOME=\"${PROFILE_HOME}\"" >> /home/hermes/.profile
 fi
 
+# ==================== 3c-pre. DASHBOARD AUTH (idempotente) ====================
+# Sempre garante que basic_auth está no config do admin — independente se o
+# config foi gerado agora ou existia de boot anterior.
+if [[ "${PROFILE}" == "admin" && -f "${CONFIG_FILE}" && -n "${ADMIN_DASHBOARD_PASSWORD:-}" ]]; then
+    ADMIN_DASH_USER="${ADMIN_DASHBOARD_USERNAME:-admin}"
+    DASH_PASS_HASH=$(python3 -c "
+import os, sys
+try:
+    sys.path.insert(0, '/app')
+    from plugins.dashboard_auth.basic import hash_password
+    print(hash_password(os.environ.get('ADMIN_DASHBOARD_PASSWORD', 'changeme')))
+except Exception as e:
+    print('', file=sys.stderr)
+" 2>/dev/null)
+
+    if [[ -n "${DASH_PASS_HASH}" ]]; then
+        # Remove bloco basic_auth existente (se houver) e reescreve
+        python3 - "${CONFIG_FILE}" "${ADMIN_DASH_USER}" "${DASH_PASS_HASH}" << 'PYEOF'
+import sys, re
+
+config_path = sys.argv[1]
+username = sys.argv[2]
+password_hash = sys.argv[3]
+
+with open(config_path, 'r') as f:
+    content = f.read()
+
+# Remove bloco dashboard.basic_auth existente
+content = re.sub(
+    r'\ndashboard:\s*\n\s+basic_auth:\s*\n\s+username:.*\n\s+password_hash:.*\n',
+    '\n',
+    content
+)
+# Remove bloco dashboard: sem basic_auth
+content = re.sub(r'\ndashboard:\s*\n(?!\s+basic_auth)', '\n', content)
+
+# Adiciona antes de gateway: ou no final
+new_block = f"\ndashboard:\n  basic_auth:\n    username: {username}\n    password_hash: \"{password_hash}\"\n"
+if 'gateway:' in content:
+    content = content.replace('\ngateway:', new_block + '\ngateway:', 1)
+else:
+    content = content.rstrip() + new_block
+
+with open(config_path, 'w') as f:
+    f.write(content)
+
+print(f"[ENTERPRISE] Dashboard basic_auth patched for user: {username}")
+PYEOF
+        ok "Dashboard auth ensured in config (idempotent)"
+    else
+        warn "Could not hash dashboard password — basic_auth not patched"
+    fi
+fi
+
 # ==================== 3c. DASHBOARD (optional) ====================
 if [[ "${DASHBOARD_ENABLED:-false}" == "true" ]]; then
     DASH_PORT="${DASHBOARD_PORT:-9119}"
@@ -444,5 +498,9 @@ if [[ "${DASHBOARD_ENABLED:-false}" == "true" ]]; then
 fi
 
 # ==================== 4. RUN ====================
+# Garantir HOME e cwd corretos — evita PermissionError ao procurar .git em /root
+export HOME=/home/hermes
+cd /home/hermes
+
 log "Starting Hermes gateway..."
 exec python -m hermes_cli.main -p "${PROFILE}" gateway run

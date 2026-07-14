@@ -1,12 +1,5 @@
 # ============================================================================
 # Docker Compose for Easypanel Deployment
-# 
-# ℹ️ This configuration assumes PostgreSQL and Redis are provisioned externally
-# via Easypanel. Connection is configured via DATABASE_URL and REDIS_URL only.
-#
-# USAGE:
-#   docker-compose -f docker-compose.easypanel.yml up -d
-#
 # ============================================================================
 
 version: "3.8"
@@ -15,10 +8,10 @@ services:
   hermes-admin:
     image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
     environment:
-      # --- Profile selection (hardcoded, not from .env) ---
+      # --- Profile (hardcoded) ---
       ENTERPRISE_PROFILE: admin
       AGENT_NAME: ${ADMIN_AGENT_NAME:-Hermes}
-      # --- Admin model ---
+      # --- Model ---
       MODEL_PROVIDER: ${ADMIN_MODEL_PROVIDER:-nvidia}
       MODEL_NAME: ${ADMIN_MODEL_NAME:-nvidia/nemotron-3-super-120b-a12b}
       MODEL_BASE_URL: ${ADMIN_MODEL_BASE_URL:-https://integrate.api.nvidia.com/v1}
@@ -28,7 +21,7 @@ services:
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: "8081"
-      API_SERVER_KEY: ${ADMIN_API_KEY:-admin-dev-key-change-in-production}
+      API_SERVER_KEY: ${ADMIN_API_KEY:-admin-dev-key}
       API_SERVER_CORS_ORIGINS: "*"
       # --- Dashboard ---
       DASHBOARD_ENABLED: "true"
@@ -36,10 +29,21 @@ services:
       DASHBOARD_HOST: 0.0.0.0
       DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
-      # --- Database (external) - Connection URL only ---
-      DATABASE_URL: ${DATABASE_URL}
-      # --- Redis (external) - Connection URL only ---
-      REDIS_URL: ${REDIS_URL}
+      # --- Database: URL (parse no entrypoint) ---
+      DATABASE_URL: ${DATABASE_URL:-}
+      # --- Database: vars convencionais (fallback / direto) ---
+      HERMES_PG_HOST: ${HERMES_PG_HOST:-}
+      HERMES_PG_PORT: ${HERMES_PG_PORT:-5432}
+      HERMES_PG_DATABASE: ${HERMES_PG_DATABASE:-hermes}
+      HERMES_PG_USER: ${HERMES_PG_USER:-}
+      HERMES_PG_PASSWORD: ${HERMES_PG_PASSWORD:-}
+      HERMES_PG_SSL: ${HERMES_PG_SSL:-false}
+      # --- Redis: URL (parse no entrypoint) ---
+      REDIS_URL: ${REDIS_URL:-}
+      # --- Redis: vars convencionais (fallback / direto) ---
+      HERMES_REDIS_HOST: ${HERMES_REDIS_HOST:-}
+      HERMES_REDIS_PORT: ${HERMES_REDIS_PORT:-6379}
+      HERMES_REDIS_PASSWORD: ${HERMES_REDIS_PASSWORD:-}
       # --- Cesto APIs ---
       CESTO_API_URL: ${CESTO_API_URL:-}
       CESTO_API_KEY: ${CESTO_API_KEY:-}
@@ -50,7 +54,12 @@ services:
       CESTO_PROD_PG_DATABASE: ${CESTO_PROD_PG_DATABASE:-}
       CESTO_PROD_PG_USER: ${CESTO_PROD_PG_USER:-}
       CESTO_PROD_PG_PASSWORD: ${CESTO_PROD_PG_PASSWORD:-}
-      # --- WaHa (WhatsApp) ---
+      CESTO_PG_HOST: ${CESTO_PG_HOST:-}
+      CESTO_PG_PORT: ${CESTO_PG_PORT:-54320}
+      CESTO_PG_DATABASE: ${CESTO_PG_DATABASE:-}
+      CESTO_PG_USER: ${CESTO_PG_USER:-}
+      CESTO_PG_PASSWORD: ${CESTO_PG_PASSWORD:-}
+      # --- WaHa ---
       WAHA_API_URL: ${WAHA_API_URL:-}
       WAHA_API_KEY: ${WAHA_API_KEY:-}
       WAHA_INSTANCE: ${WAHA_INSTANCE:-}
@@ -59,8 +68,8 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       # --- Misc ---
       HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-INFO}
-      HERMES_TUI: ${HERMES_TUI:-false}
-      HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
+      HERMES_TUI: "false"
+      HERMES_HEADLESS: "true"
       GATEWAY_ALLOW_ALL_USERS: ${GATEWAY_ALLOW_ALL_USERS:-false}
       HOME: /home/hermes
     working_dir: /home/hermes
@@ -69,30 +78,18 @@ services:
     expose:
       - "8081"
       - "9119"
-    healthcheck:
-      test: ["CMD", "sh", "-c", "netstat -tlnp 2>/dev/null | grep -q :8081 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 120s
     restart: unless-stopped
     networks:
       - hermes-enterprise-network
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-        reservations:
-          memory: 1G
 
   hermes-atendimento:
     image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
     environment:
-      # --- Profile selection (hardcoded, not from .env) ---
+      # --- Profile (hardcoded) ---
       ENTERPRISE_PROFILE: atendimento
       SKIP_ANA_SCHEMA: "true"
       AGENT_NAME: Ana
-      # --- Ana model: OpenAI ---
+      # --- Model ---
       MODEL_PROVIDER: openai
       MODEL_NAME: ${ANA_MODEL_NAME:-gpt-5-nano}
       MODEL_BASE_URL: ${ANA_MODEL_BASE_URL:-https://api.openai.com/v1}
@@ -102,14 +99,25 @@ services:
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: "8082"
-      API_SERVER_KEY: ${ANA_API_KEY:-ana-dev-key-change-in-production}
+      API_SERVER_KEY: ${ANA_API_KEY:-ana-dev-key}
       API_SERVER_CORS_ORIGINS: "*"
-      # --- Dashboard (only on admin) ---
+      # --- Dashboard desabilitado ---
       DASHBOARD_ENABLED: "false"
-      # --- Database (external) - Connection URL only ---
-      DATABASE_URL: ${DATABASE_URL}
-      # --- Redis (external) - Connection URL only ---
-      REDIS_URL: ${REDIS_URL}
+      # --- Database: URL ---
+      DATABASE_URL: ${DATABASE_URL:-}
+      # --- Database: vars convencionais ---
+      HERMES_PG_HOST: ${HERMES_PG_HOST:-}
+      HERMES_PG_PORT: ${HERMES_PG_PORT:-5432}
+      HERMES_PG_DATABASE: ${HERMES_PG_DATABASE:-hermes}
+      HERMES_PG_USER: ${HERMES_PG_USER:-}
+      HERMES_PG_PASSWORD: ${HERMES_PG_PASSWORD:-}
+      HERMES_PG_SSL: ${HERMES_PG_SSL:-false}
+      # --- Redis: URL ---
+      REDIS_URL: ${REDIS_URL:-}
+      # --- Redis: vars convencionais ---
+      HERMES_REDIS_HOST: ${HERMES_REDIS_HOST:-}
+      HERMES_REDIS_PORT: ${HERMES_REDIS_PORT:-6379}
+      HERMES_REDIS_PASSWORD: ${HERMES_REDIS_PASSWORD:-}
       # --- Cesto APIs ---
       CESTO_API_URL: ${CESTO_API_URL:-}
       CESTO_API_KEY: ${CESTO_API_KEY:-}
@@ -120,7 +128,12 @@ services:
       CESTO_PROD_PG_DATABASE: ${CESTO_PROD_PG_DATABASE:-}
       CESTO_PROD_PG_USER: ${CESTO_PROD_PG_USER:-}
       CESTO_PROD_PG_PASSWORD: ${CESTO_PROD_PG_PASSWORD:-}
-      # --- WaHa (WhatsApp) ---
+      CESTO_PG_HOST: ${CESTO_PG_HOST:-}
+      CESTO_PG_PORT: ${CESTO_PG_PORT:-54320}
+      CESTO_PG_DATABASE: ${CESTO_PG_DATABASE:-}
+      CESTO_PG_USER: ${CESTO_PG_USER:-}
+      CESTO_PG_PASSWORD: ${CESTO_PG_PASSWORD:-}
+      # --- WaHa ---
       WAHA_API_URL: ${WAHA_API_URL:-}
       WAHA_API_KEY: ${WAHA_API_KEY:-}
       WAHA_INSTANCE: ${WAHA_INSTANCE:-}
@@ -129,8 +142,8 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       # --- Misc ---
       HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-INFO}
-      HERMES_TUI: ${HERMES_TUI:-false}
-      HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
+      HERMES_TUI: "false"
+      HERMES_HEADLESS: "true"
       GATEWAY_ALLOW_ALL_USERS: ${GATEWAY_ALLOW_ALL_USERS:-false}
       HOME: /home/hermes
     working_dir: /home/hermes
@@ -138,21 +151,9 @@ services:
       - hermes-atendimento-data:/home/hermes/.hermes
     expose:
       - "8082"
-    healthcheck:
-      test: ["CMD", "sh", "-c", "netstat -tlnp 2>/dev/null | grep -q :8082 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 120s
     restart: unless-stopped
     networks:
       - hermes-enterprise-network
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-        reservations:
-          memory: 1G
 
 volumes:
   hermes-admin-data:
