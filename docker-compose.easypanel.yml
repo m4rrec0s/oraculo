@@ -15,13 +15,13 @@ services:
   hermes-admin:
     image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
     environment:
-      # --- Profile selection ---
+      # --- Profile selection (hardcoded, not from .env) ---
       ENTERPRISE_PROFILE: admin
-      AGENT_NAME: Hermes
-      # --- Admin model: NVIDIA Nemotron ---
-      MODEL_PROVIDER: nvidia
-      MODEL_NAME: nvidia/nemotron-3-super-120b-a12b
-      MODEL_BASE_URL: https://integrate.api.nvidia.com/v1
+      AGENT_NAME: ${ADMIN_AGENT_NAME:-Hermes}
+      # --- Admin model ---
+      MODEL_PROVIDER: ${ADMIN_MODEL_PROVIDER:-nvidia}
+      MODEL_NAME: ${ADMIN_MODEL_NAME:-nvidia/nemotron-3-super-120b-a12b}
+      MODEL_BASE_URL: ${ADMIN_MODEL_BASE_URL:-https://integrate.api.nvidia.com/v1}
       API_KEY_VAR: NVIDIA_API_KEY
       NVIDIA_API_KEY: ${NVIDIA_API_KEY}
       # --- API server ---
@@ -34,14 +34,34 @@ services:
       DASHBOARD_ENABLED: "true"
       DASHBOARD_PORT: "9119"
       DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
       # --- Database (external) - Connection URL only ---
       DATABASE_URL: ${DATABASE_URL}
       # --- Redis (external) - Connection URL only ---
       REDIS_URL: ${REDIS_URL}
+      # --- Cesto APIs ---
+      CESTO_API_URL: ${CESTO_API_URL:-}
+      CESTO_API_KEY: ${CESTO_API_KEY:-}
+      CESTO_API_EMAIL: ${CESTO_API_EMAIL:-}
+      CESTO_API_PASSWORD: ${CESTO_API_PASSWORD:-}
+      CESTO_PROD_PG_HOST: ${CESTO_PROD_PG_HOST:-}
+      CESTO_PROD_PG_PORT: ${CESTO_PROD_PG_PORT:-54320}
+      CESTO_PROD_PG_DATABASE: ${CESTO_PROD_PG_DATABASE:-}
+      CESTO_PROD_PG_USER: ${CESTO_PROD_PG_USER:-}
+      CESTO_PROD_PG_PASSWORD: ${CESTO_PROD_PG_PASSWORD:-}
+      # --- WaHa (WhatsApp) ---
+      WAHA_API_URL: ${WAHA_API_URL:-}
+      WAHA_API_KEY: ${WAHA_API_KEY:-}
+      WAHA_INSTANCE: ${WAHA_INSTANCE:-}
+      WHATSAPP_GROUP_ID: ${WHATSAPP_GROUP_ID:-}
+      # --- Telegram ---
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       # --- Misc ---
       HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-INFO}
       HERMES_TUI: ${HERMES_TUI:-false}
       HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
+      GATEWAY_ALLOW_ALL_USERS: ${GATEWAY_ALLOW_ALL_USERS:-false}
       HOME: /home/hermes
     working_dir: /home/hermes
     volumes:
@@ -58,18 +78,24 @@ services:
     restart: unless-stopped
     networks:
       - hermes-enterprise-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
 
   hermes-atendimento:
     image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
     environment:
-      # --- Profile selection ---
+      # --- Profile selection (hardcoded, not from .env) ---
       ENTERPRISE_PROFILE: atendimento
       SKIP_ANA_SCHEMA: "true"
       AGENT_NAME: Ana
-      # --- Ana model: OpenAI gpt-5-nano ---
+      # --- Ana model: OpenAI ---
       MODEL_PROVIDER: openai
-      MODEL_NAME: gpt-5-nano
-      MODEL_BASE_URL: https://api.openai.com/v1
+      MODEL_NAME: ${ANA_MODEL_NAME:-gpt-5-nano}
+      MODEL_BASE_URL: ${ANA_MODEL_BASE_URL:-https://api.openai.com/v1}
       API_KEY_VAR: OPENAI_API_KEY
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       # --- API server ---
@@ -84,10 +110,28 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       # --- Redis (external) - Connection URL only ---
       REDIS_URL: ${REDIS_URL}
+      # --- Cesto APIs ---
+      CESTO_API_URL: ${CESTO_API_URL:-}
+      CESTO_API_KEY: ${CESTO_API_KEY:-}
+      CESTO_API_EMAIL: ${CESTO_API_EMAIL:-}
+      CESTO_API_PASSWORD: ${CESTO_API_PASSWORD:-}
+      CESTO_PROD_PG_HOST: ${CESTO_PROD_PG_HOST:-}
+      CESTO_PROD_PG_PORT: ${CESTO_PROD_PG_PORT:-54320}
+      CESTO_PROD_PG_DATABASE: ${CESTO_PROD_PG_DATABASE:-}
+      CESTO_PROD_PG_USER: ${CESTO_PROD_PG_USER:-}
+      CESTO_PROD_PG_PASSWORD: ${CESTO_PROD_PG_PASSWORD:-}
+      # --- WaHa (WhatsApp) ---
+      WAHA_API_URL: ${WAHA_API_URL:-}
+      WAHA_API_KEY: ${WAHA_API_KEY:-}
+      WAHA_INSTANCE: ${WAHA_INSTANCE:-}
+      WHATSAPP_GROUP_ID: ${WHATSAPP_GROUP_ID:-}
+      # --- Telegram ---
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       # --- Misc ---
       HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-INFO}
       HERMES_TUI: ${HERMES_TUI:-false}
       HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
+      GATEWAY_ALLOW_ALL_USERS: ${GATEWAY_ALLOW_ALL_USERS:-false}
       HOME: /home/hermes
     working_dir: /home/hermes
     volumes:
@@ -99,10 +143,16 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 90s
+      start_period: 120s
     restart: unless-stopped
     networks:
       - hermes-enterprise-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
 
 volumes:
   hermes-admin-data:
