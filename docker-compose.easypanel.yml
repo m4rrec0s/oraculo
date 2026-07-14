@@ -17,6 +17,7 @@ services:
       MODEL_BASE_URL: ${ADMIN_MODEL_BASE_URL:-https://integrate.api.nvidia.com/v1}
       API_KEY_VAR: NVIDIA_API_KEY
       NVIDIA_API_KEY: ${NVIDIA_API_KEY}
+      OPENAI_API_KEY: ""
       # --- API server ---
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
@@ -95,6 +96,7 @@ services:
       MODEL_BASE_URL: ${ANA_MODEL_BASE_URL:-https://api.openai.com/v1}
       API_KEY_VAR: OPENAI_API_KEY
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      NVIDIA_API_KEY: ""
       # --- API server ---
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0

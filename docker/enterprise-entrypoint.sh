@@ -83,9 +83,19 @@ fi
 MODEL_PROVIDER="${MODEL_PROVIDER:-nvidia}"
 MODEL_NAME="${MODEL_NAME:-nvidia/nemotron-3-super-120b-a12b}"
 MODEL_BASE_URL="${MODEL_BASE_URL:-https://integrate.api.nvidia.com/v1}"
-API_KEY_VAR="${API_KEY_VAR:-NVIDIA_API_KEY}"
-# Resolve the actual key value from the provider-specific env var name
-API_KEY_VAL="${!API_KEY_VAR:-}"
+
+# Resolve API key: usa API_KEY_VAR se definido, senão infere pelo MODEL_PROVIDER
+if [[ -n "${API_KEY_VAR:-}" ]]; then
+  API_KEY_VAL="${!API_KEY_VAR:-}"
+else
+  case "${MODEL_PROVIDER}" in
+    openai)   API_KEY_VAL="${OPENAI_API_KEY:-}" ;;
+    nvidia)   API_KEY_VAL="${NVIDIA_API_KEY:-}" ;;
+    anthropic) API_KEY_VAL="${ANTHROPIC_API_KEY:-}" ;;
+    openrouter) API_KEY_VAL="${OPENROUTER_API_KEY:-}" ;;
+    *)        API_KEY_VAL="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}" ;;
+  esac
+fi
 
 log "Profile: ${MAGENTA}${PROFILE}${NC}"
 log "Model:   ${MAGENTA}${MODEL_PROVIDER}/${MODEL_NAME}${NC}"
@@ -203,8 +213,12 @@ log "HERMES_HOME: ${MAGENTA}${HERMES_HOME}${NC}"
 # Regenerate when the recorded model.default no longer matches the env model.
 if [[ -f "${CONFIG_FILE}" ]]; then
   _cfg_default=$(grep -E '^  default:' "${CONFIG_FILE}" | head -1 | sed 's/.*default:[[:space:]]*//' | tr -d '"' || true)
+  _cfg_apikey=$(grep -E '^  api_key:' "${CONFIG_FILE}" | head -1 | sed 's/.*api_key:[[:space:]]*//' | tr -d '"' || true)
   if [[ "${_cfg_default}" != "${MODEL_NAME}" ]]; then
     warn "Model env changed (config: '${_cfg_default}', env: '${MODEL_NAME}') — regenerating config"
+    rm -f "${CONFIG_FILE}"
+  elif [[ -n "${API_KEY_VAL}" && "${_cfg_apikey}" != "${API_KEY_VAL}" ]]; then
+    warn "API key changed — regenerating config"
     rm -f "${CONFIG_FILE}"
   fi
 fi
@@ -220,6 +234,9 @@ if [[ ! -f "${CONFIG_FILE}" ]]; then
         PROVIDER_CONFIG="custom"
     fi
 
+    # API_KEY_VAL já foi resolvido no topo pelo MODEL_PROVIDER
+    RESOLVED_API_KEY="${API_KEY_VAL}"
+
     # Atendimento gets minimal config — only clarify + web tools
     if [[ "${PROFILE}" == "atendimento" ]]; then
         cat > "${CONFIG_FILE}" << YAMLEOF
@@ -229,7 +246,10 @@ model:
   provider: ${PROVIDER_CONFIG}
   default: ${MODEL_NAME}
   base_url: ${MODEL_BASE_URL}
-  api_key: "${API_KEY_VAL}"
+  api_key: "${RESOLVED_API_KEY}"
+
+terminal:
+  cwd: /home/hermes
 
 agent:
   name: ${AGENT_NAME:-Ana}
@@ -287,15 +307,20 @@ api_server:
 YAMLEOF
     else
         # Generate dashboard auth hash for admin profile
-        ADMIN_DASH_USER="${ADMIN_DASHBOARD_USERNAME:-admin}"
-        ADMIN_DASH_PASS="${ADMIN_DASHBOARD_PASSWORD:-changeme}"
+        ADMIN_DASH_USER="${DASHBOARD_USERNAME:-${ADMIN_DASHBOARD_USERNAME:-admin}}"
+        _DASH_PASS="${DASHBOARD_PASSWORD:-${ADMIN_DASHBOARD_PASSWORD:-}}"
         DASH_PASS_HASH=$(python3 << 'HERMES_DASH_AUTH'
 import os, sys
+sys.path.insert(0, '/app')
+pw = os.environ.get('DASHBOARD_PASSWORD') or os.environ.get('ADMIN_DASHBOARD_PASSWORD') or ''
+if not pw:
+    sys.exit(0)
 try:
     from plugins.dashboard_auth.basic import hash_password
-    print(hash_password(os.environ.get("ADMIN_DASHBOARD_PASSWORD", "changeme")))
-except Exception:
-    print("", file=sys.stderr)
+    print(hash_password(pw))
+except Exception as e:
+    print(f'hash error: {e}', file=sys.stderr)
+    sys.exit(1)
 HERMES_DASH_AUTH
         )
 
@@ -306,7 +331,10 @@ model:
   provider: ${PROVIDER_CONFIG}
   default: ${MODEL_NAME}
   base_url: ${MODEL_BASE_URL}
-  api_key: "${API_KEY_VAL}"
+  api_key: "${RESOLVED_API_KEY}"
+
+terminal:
+  cwd: /home/hermes
 
 agent:
   name: ${AGENT_NAME:-Hermes}
@@ -428,16 +456,26 @@ fi
 # ==================== 3c-pre. DASHBOARD AUTH (idempotente) ====================
 # Sempre garante que basic_auth está no config do admin — independente se o
 # config foi gerado agora ou existia de boot anterior.
-if [[ "${PROFILE}" == "admin" && -f "${CONFIG_FILE}" && -n "${ADMIN_DASHBOARD_PASSWORD:-}" ]]; then
-    ADMIN_DASH_USER="${ADMIN_DASHBOARD_USERNAME:-admin}"
+if [[ "${PROFILE}" == "admin" && -f "${CONFIG_FILE}" ]]; then
+    ADMIN_DASH_USER="${DASHBOARD_USERNAME:-${ADMIN_DASHBOARD_USERNAME:-admin}}"
+    # Aceita DASHBOARD_PASSWORD ou ADMIN_DASHBOARD_PASSWORD
+    _DASH_PASS="${DASHBOARD_PASSWORD:-${ADMIN_DASHBOARD_PASSWORD:-}}"
+    if [[ -z "${_DASH_PASS}" ]]; then
+        warn "DASHBOARD_PASSWORD não definido — dashboard básico sem auth"
+    fi
     DASH_PASS_HASH=$(python3 -c "
 import os, sys
+sys.path.insert(0, '/app')
+# Aceita DASHBOARD_PASSWORD ou ADMIN_DASHBOARD_PASSWORD
+pw = os.environ.get('DASHBOARD_PASSWORD') or os.environ.get('ADMIN_DASHBOARD_PASSWORD') or ''
+if not pw:
+    sys.exit(0)
 try:
-    sys.path.insert(0, '/app')
     from plugins.dashboard_auth.basic import hash_password
-    print(hash_password(os.environ.get('ADMIN_DASHBOARD_PASSWORD', 'changeme')))
+    print(hash_password(pw))
 except Exception as e:
-    print('', file=sys.stderr)
+    print(f'hash error: {e}', file=sys.stderr)
+    sys.exit(1)
 " 2>/dev/null)
 
     if [[ -n "${DASH_PASS_HASH}" ]]; then
@@ -500,6 +538,7 @@ fi
 # ==================== 4. RUN ====================
 # Garantir HOME e cwd corretos — evita PermissionError ao procurar .git em /root
 export HOME=/home/hermes
+export TERMINAL_CWD=/home/hermes
 cd /home/hermes
 
 log "Starting Hermes gateway..."
