@@ -345,9 +345,26 @@ if [[ "${PROFILE}" == "admin" && ! -f "${SOUL_FILE}" ]]; then
     fi
 fi
 
+# ==================== 3b-3. ENTERPRISE CUSTOM SKILLS (seed granular) ====================
+# Usa seed granular para sincronizar skills com detecção de edição manual
+# O script seed-sync.py gerencia um manifest JSON para distinguir:
+# - Arquivos novos (copiar)
+# - Arquivos não editados (atualizar se template mudar)
+# - Arquivos editados manualmente (NÃO sobrescrever)
 if [[ -d "/home/hermes/enterprise/skills/${PROFILE}" ]]; then
-    cp -rf "/home/hermes/enterprise/skills/${PROFILE}/"* "${PROFILE_HOME}/skills/" 2>/dev/null || true
-    ok "Enterprise custom skills copied for ${PROFILE}"
+    if [[ -f "/app/scripts/seed-sync.sh" ]]; then
+        # Rodar dentro do container (script no /app)
+        /app/scripts/seed-sync.sh /home/hermes/enterprise "${PROFILE_HOME}" "${PROFILE}"
+        ok "Enterprise custom skills synced (seed granular) for ${PROFILE}"
+    elif [[ -f "/home/hermes/scripts/seed-sync.sh" ]]; then
+        # Fallback: script montado no volume
+        /home/hermes/scripts/seed-sync.sh /home/hermes/enterprise "${PROFILE_HOME}" "${PROFILE}"
+        ok "Enterprise custom skills synced (seed granular) for ${PROFILE}"
+    else
+        warn "seed-sync.sh não encontrado — usando fallback legacy (cp -rf)"
+        cp -rf "/home/hermes/enterprise/skills/${PROFILE}/"* "${PROFILE_HOME}/skills/" 2>/dev/null || true
+        ok "Enterprise custom skills copied (legacy fallback) for ${PROFILE}"
+    fi
 fi
 
 # Persist HERMES_HOME for docker exec sessions (interactive bash sources .bashrc)

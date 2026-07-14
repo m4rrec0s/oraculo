@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -359,6 +362,162 @@ def learn_rollback(proposal_id: str) -> None:
 def config_group() -> None:
     """Configuração Enterprise."""
     pass
+
+
+# ==================== PERSONA ====================
+
+@enterprise_group.group(name="persona")
+def persona_group() -> None:
+    """Gerenciamento de persona (SOUL.md) dos profiles."""
+    pass
+
+
+@persona_group.command("show")
+@click.argument("profile", type=str, default="atendimento")
+def persona_show(profile: str) -> None:
+    """Mostra persona atual do profile."""
+    from enterprise.edit_service import EditService
+
+    service = EditService(profile)
+    content, err = service.get_persona()
+
+    if err:
+        console.print(f"[red]❌ {err}[/red]")
+        return
+
+    console.print(Panel(content, title=f"[magenta]Persona — {profile}[/magenta]", expand=False))
+
+
+@persona_group.command("edit")
+@click.argument("profile", type=str, default="atendimento")
+def persona_edit(profile: str) -> None:
+    """Abre editor para modificar a persona do profile."""
+    import subprocess
+    import tempfile
+    from enterprise.edit_service import EditService
+
+    service = EditService(profile)
+    content, err = service.get_persona()
+
+    if err:
+        console.print(f"[red]❌ {err}[/red]")
+        return
+
+    # Abre editor
+    editor = os.environ.get("EDITOR", "vi")
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(content)
+        temp_path = f.name
+
+    try:
+        subprocess.run([editor, temp_path], check=False)
+        new_content = Path(temp_path).read_text(encoding="utf-8")
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+    # Aplica mudança via service
+    result = service.edit_persona(new_content, trigger_reload=True)
+
+    if result.success:
+        console.print(f"[green]✅ {result.message}[/green]")
+        if result.backup_path:
+            console.print(f"   Backup: {result.backup_path}")
+        if result.reload_triggered:
+            console.print("[cyan]   Gateway recarregado (novas conversas refletem a mudança)[/cyan]")
+    else:
+        console.print(f"[red]❌ {result.message}[/red]")
+
+
+# ==================== SKILL ====================
+
+@enterprise_group.group(name="skill")
+def skill_group() -> None:
+    """Gerenciamento de skills dos profiles."""
+    pass
+
+
+@skill_group.command("list")
+@click.argument("profile", type=str, default="atendimento")
+def skill_list(profile: str) -> None:
+    """Lista skills disponíveis no profile."""
+    from enterprise.edit_service import EditService
+
+    service = EditService(profile)
+    skills = service.list_skills()
+
+    if not skills:
+        console.print(f"[yellow]⚠️  Nenhuma skill encontrada no profile '{profile}'[/yellow]")
+        return
+
+    table = Table(title=f"🎯 Skills — {profile}", border_style="cyan")
+    table.add_column("Nome", style="bold")
+
+    for skill_name in skills:
+        table.add_row(skill_name)
+
+    console.print(table)
+
+
+@skill_group.command("show")
+@click.argument("profile", type=str, default="atendimento")
+@click.argument("skill_name", type=str, required=True)
+def skill_show(profile: str, skill_name: str) -> None:
+    """Mostra conteúdo de uma skill."""
+    from enterprise.edit_service import EditService
+
+    service = EditService(profile)
+    content, err = service.get_skill(skill_name)
+
+    if err:
+        console.print(f"[red]❌ {err}[/red]")
+        return
+
+    console.print(Panel(content, title=f"[magenta]Skill: {skill_name}[/magenta]", expand=False))
+
+
+@skill_group.command("edit")
+@click.argument("profile", type=str, default="atendimento")
+@click.argument("skill_name", type=str, required=True)
+def skill_edit(profile: str, skill_name: str) -> None:
+    """Abre editor para modificar uma skill."""
+    import subprocess
+    import tempfile
+    from enterprise.edit_service import EditService
+
+    service = EditService(profile)
+    content, err = service.get_skill(skill_name)
+
+    if err:
+        console.print(f"[red]❌ {err}[/red]")
+        return
+
+    # Abre editor
+    editor = os.environ.get("EDITOR", "vi")
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(content)
+        temp_path = f.name
+
+    try:
+        subprocess.run([editor, temp_path], check=False)
+        new_content = Path(temp_path).read_text(encoding="utf-8")
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+    # Aplica mudança via service
+    result = service.edit_skill(skill_name, new_content, trigger_reload=True)
+
+    if result.success:
+        console.print(f"[green]✅ {result.message}[/green]")
+        if result.backup_path:
+            console.print(f"   Backup: {result.backup_path}")
+        if result.reload_triggered:
+            console.print("[cyan]   Gateway recarregado (novas conversas refletem a mudança)[/cyan]")
+    else:
+        console.print(f"[red]❌ {result.message}[/red]")
 
 
 @config_group.command("validate")
