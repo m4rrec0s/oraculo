@@ -2,13 +2,9 @@
 # Docker Compose for Easypanel Deployment
 # 
 # ℹ️ This configuration assumes PostgreSQL and Redis are provisioned externally
-# via Easypanel (or another infrastructure) using the easypanel-provision.ts script.
+# via Easypanel. Connection is configured via DATABASE_URL and REDIS_URL only.
 #
 # USAGE:
-#   # Provision infrastructure in Easypanel (one-time setup)
-#   EASYPANEL_URL=https://... EASYPANEL_TOKEN=... npm run provision:easypanel
-#
-#   # Deploy this compose file
 #   docker-compose -f docker-compose.easypanel.yml up -d
 #
 # ============================================================================
@@ -19,7 +15,7 @@ services:
   hermes-admin:
     image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
     environment:
-      # --- Profile selection (entrypoint reads ENTERPRISE_PROFILE) ---
+      # --- Profile selection ---
       ENTERPRISE_PROFILE: admin
       AGENT_NAME: Hermes
       # --- Admin model: NVIDIA Nemotron ---
@@ -28,7 +24,7 @@ services:
       MODEL_BASE_URL: https://integrate.api.nvidia.com/v1
       API_KEY_VAR: NVIDIA_API_KEY
       NVIDIA_API_KEY: ${NVIDIA_API_KEY}
-      # --- API server (HTTP, Bearer API_SERVER_KEY) ---
+      # --- API server ---
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: "8081"
@@ -38,9 +34,9 @@ services:
       DASHBOARD_ENABLED: "true"
       DASHBOARD_PORT: "9119"
       DASHBOARD_HOST: 0.0.0.0
-      # --- Database (external) - Connection URL ---
+      # --- Database (external) - Connection URL only ---
       DATABASE_URL: ${DATABASE_URL}
-      # --- Redis (external) - Connection URL ---
+      # --- Redis (external) - Connection URL only ---
       REDIS_URL: ${REDIS_URL}
       # --- Misc ---
       HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-INFO}
@@ -60,21 +56,13 @@ services:
       retries: 3
       start_period: 90s
     restart: unless-stopped
-    # Autodeploy trigger after container starts (optional)
-    # Uncomment the lines below to enable automatic webhook trigger
-    # command: >
-    #   sh -c "
-    #   python3 -m hermes gateway &
-    #   sleep 120 &&
-    #   curl -X POST http://185.205.246.213:3000/api/deploy/3a4abf2c67756fd6712e642f95b43e3afaeb69447b1d73a2
-    #   "
     networks:
       - hermes-enterprise-network
 
   hermes-atendimento:
     image: ghcr.io/m4rrec0s/oraculo/hermes-enterprise:latest
     environment:
-      # --- Profile selection (entrypoint reads ENTERPRISE_PROFILE) ---
+      # --- Profile selection ---
       ENTERPRISE_PROFILE: atendimento
       AGENT_NAME: Ana
       # --- Ana model: OpenAI gpt-5-nano ---
@@ -83,15 +71,15 @@ services:
       MODEL_BASE_URL: https://api.openai.com/v1
       API_KEY_VAR: OPENAI_API_KEY
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      # --- API server (HTTP, Bearer API_SERVER_KEY) ---
+      # --- API server ---
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: "8082"
       API_SERVER_KEY: ${ANA_API_KEY}
       API_SERVER_CORS_ORIGINS: "*"
-      # --- Database (external) - Connection URL ---
+      # --- Database (external) - Connection URL only ---
       DATABASE_URL: ${DATABASE_URL}
-      # --- Redis (external) - Connection URL ---
+      # --- Redis (external) - Connection URL only ---
       REDIS_URL: ${REDIS_URL}
       # --- Misc ---
       HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-INFO}
@@ -110,14 +98,6 @@ services:
       retries: 3
       start_period: 90s
     restart: unless-stopped
-    # Autodeploy trigger after container starts (optional)
-    # Uncomment the lines below to enable automatic webhook trigger
-    # command: >
-    #   sh -c "
-    #   python3 -m hermes gateway &
-    #   sleep 120 &&
-    #   curl -X POST http://185.205.246.213:3000/api/deploy/ce1d1e068927681fce50e871683c48aa77bc87a4d47312ee
-    #   "
     networks:
       - hermes-enterprise-network
 

@@ -32,6 +32,45 @@ HERMES_HOME_BASE="${HERMES_HOME:-/home/hermes/.hermes}"
 PROFILE_HOME="${HERMES_HOME_BASE}/profiles/${PROFILE}"
 CONFIG_FILE="${PROFILE_HOME}/config.yaml"
 
+# Parse DATABASE_URL if provided (format: postgresql://user:password@host:port/database)
+if [[ -n "${DATABASE_URL:-}" ]]; then
+  log "Parsing DATABASE_URL..."
+  # Extract components from DATABASE_URL
+  # Format: postgresql://user:password@host:port/database
+  if [[ $DATABASE_URL =~ ^postgresql://([^:]+):([^@]+)@([^:]+):([^/]+)/(.+)$ ]]; then
+    export HERMES_PG_USER="${BASH_REMATCH[1]}"
+    export HERMES_PG_PASSWORD="${BASH_REMATCH[2]}"
+    export HERMES_PG_HOST="${BASH_REMATCH[3]}"
+    export HERMES_PG_PORT="${BASH_REMATCH[4]}"
+    export HERMES_PG_DATABASE="${BASH_REMATCH[5]}"
+    ok "DATABASE_URL parsed: user=$HERMES_PG_USER, host=$HERMES_PG_HOST:$HERMES_PG_PORT, db=$HERMES_PG_DATABASE"
+  else
+    warn "DATABASE_URL format invalid, using HERMES_PG_* vars if available"
+  fi
+fi
+
+# Parse REDIS_URL if provided (format: redis://:password@host:port)
+if [[ -n "${REDIS_URL:-}" ]]; then
+  log "Parsing REDIS_URL..."
+  # Extract components from REDIS_URL
+  # Format: redis://:password@host:port or redis://host:port
+  if [[ $REDIS_URL =~ ^redis://(:)?([^@]*)@([^:]+):(.+)$ ]]; then
+    # Has password
+    export HERMES_REDIS_PASSWORD="${BASH_REMATCH[2]}"
+    export HERMES_REDIS_HOST="${BASH_REMATCH[3]}"
+    export HERMES_REDIS_PORT="${BASH_REMATCH[4]}"
+    ok "REDIS_URL parsed (with password): host=$HERMES_REDIS_HOST:$HERMES_REDIS_PORT"
+  elif [[ $REDIS_URL =~ ^redis://([^:]+):(.+)$ ]]; then
+    # No password
+    export HERMES_REDIS_HOST="${BASH_REMATCH[1]}"
+    export HERMES_REDIS_PORT="${BASH_REMATCH[2]}"
+    export HERMES_REDIS_PASSWORD=""
+    ok "REDIS_URL parsed (no password): host=$HERMES_REDIS_HOST:$HERMES_REDIS_PORT"
+  else
+    warn "REDIS_URL format invalid, using HERMES_REDIS_* vars if available"
+  fi
+fi
+
 # Model config — override via env vars
 MODEL_PROVIDER="${MODEL_PROVIDER:-nvidia}"
 MODEL_NAME="${MODEL_NAME:-nvidia/nemotron-3-super-120b-a12b}"
