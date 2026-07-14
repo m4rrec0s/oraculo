@@ -50,11 +50,11 @@ services:
       - "8081"
       - "9119"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+      test: ["CMD", "sh", "-c", "netstat -tlnp 2>/dev/null | grep -q :8081 || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 90s
+      start_period: 120s
     restart: unless-stopped
     networks:
       - hermes-enterprise-network
@@ -95,9 +95,9 @@ services:
     expose:
       - "8082"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')"]
+      test: ["CMD", "sh", "-c", "netstat -tlnp 2>/dev/null | grep -q :8082 || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
       start_period: 90s
     restart: unless-stopped

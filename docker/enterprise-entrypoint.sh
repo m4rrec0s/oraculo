@@ -32,6 +32,10 @@ HERMES_HOME_BASE="${HERMES_HOME:-/home/hermes/.hermes}"
 PROFILE_HOME="${HERMES_HOME_BASE}/profiles/${PROFILE}"
 CONFIG_FILE="${PROFILE_HOME}/config.yaml"
 
+# Debug: show which profile was selected
+log "ENTERPRISE_PROFILE env var: ${ENTERPRISE_PROFILE:-[not set, using default]}"
+log "Selected profile: ${PROFILE}"
+
 # Parse DATABASE_URL if provided (format: postgresql://user:password@host:port/database)
 if [[ -n "${DATABASE_URL:-}" ]]; then
   log "Parsing DATABASE_URL..."
