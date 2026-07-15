@@ -215,11 +215,13 @@ if [[ -f "${CONFIG_FILE}" ]]; then
   _cfg_default=$(grep -E '^  default:' "${CONFIG_FILE}" | head -1 | sed 's/.*default:[[:space:]]*//' | tr -d '"' || true)
   _seeded=$(cat "${PROFILE_HOME}/.model_seeded" 2>/dev/null || true)
   if [[ -z "${_seeded}" ]]; then
-    # No baseline recorded (e.g. config seeded by another path) — adopt the
-    # current model.default as the seeded baseline so a later /model switch is
-    # detected and preserved instead of being treated as an env mismatch.
-    echo "${_cfg_default}" > "${PROFILE_HOME}/.model_seeded"
-    _seeded="${_cfg_default}"
+    # No baseline recorded. The true seeded default is the env model (MODEL_NAME),
+    # NOT whatever is currently in config — a user may have already switched
+    # models (e.g. via /mode) before this sidecar existed. Record the env
+    # default so a user-set model reads as a deviation and is preserved,
+    # instead of being mistaken for an env mismatch and regenerated away.
+    echo "${MODEL_NAME}" > "${PROFILE_HOME}/.model_seeded"
+    _seeded="${MODEL_NAME}"
   fi
   if [[ "${_seeded}" != "${_cfg_default}" ]]; then
     # User switched the model via /model — preserve the choice across restarts.
