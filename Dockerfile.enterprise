@@ -85,6 +85,13 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 COPY --chown=hermes:hermes docker/enterprise-entrypoint.sh /home/hermes/enterprise-entrypoint.sh
 RUN chmod +x /home/hermes/enterprise-entrypoint.sh
 
+# Expose `hermes` CLI on PATH for interactive/manual ops (skills query, setup,
+# config edits). The project source lives at /app (PYTHONPATH), so `uv pip
+# install -r pyproject.toml` installs deps but never generates the console
+# script — wire a thin wrapper that calls the module entry point.
+RUN printf '#!/usr/bin/env bash\nexec python -m hermes_cli.main "$@"\n' > /usr/local/bin/hermes \
+    && chmod +x /usr/local/bin/hermes
+
 # Entry point - usa enterprise entrypoint
 ENTRYPOINT ["/home/hermes/enterprise-entrypoint.sh"]
 CMD ["python", "-m", "hermes_cli.main", "--help"]

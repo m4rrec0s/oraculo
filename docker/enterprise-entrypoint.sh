@@ -213,13 +213,36 @@ log "HERMES_HOME: ${MAGENTA}${HERMES_HOME}${NC}"
 # Regenerate when the recorded model.default no longer matches the env model.
 if [[ -f "${CONFIG_FILE}" ]]; then
   _cfg_default=$(grep -E '^  default:' "${CONFIG_FILE}" | head -1 | sed 's/.*default:[[:space:]]*//' | tr -d '"' || true)
-  _cfg_apikey=$(grep -E '^  api_key:' "${CONFIG_FILE}" | head -1 | sed 's/.*api_key:[[:space:]]*//' | tr -d '"' || true)
-  if [[ "${_cfg_default}" != "${MODEL_NAME}" ]]; then
+  _seeded=$(cat "${PROFILE_HOME}/.model_seeded" 2>/dev/null || true)
+  if [[ -z "${_seeded}" ]]; then
+    # No baseline recorded (e.g. config seeded by another path) — adopt the
+    # current model.default as the seeded baseline so a later /model switch is
+    # detected and preserved instead of being treated as an env mismatch.
+    echo "${_cfg_default}" > "${PROFILE_HOME}/.model_seeded"
+    _seeded="${_cfg_default}"
+  fi
+  if [[ "${_seeded}" != "${_cfg_default}" ]]; then
+    # User switched the model via /model — preserve the choice across restarts.
+    log "Model '${_cfg_default}' is user-set — preserving across restart (env default '${MODEL_NAME}')"
+  elif [[ "${_cfg_default}" != "${MODEL_NAME}" ]]; then
+    # Still on the seeded default but the env default changed — apply it.
     warn "Model env changed (config: '${_cfg_default}', env: '${MODEL_NAME}') — regenerating config"
     rm -f "${CONFIG_FILE}"
-  elif [[ -n "${API_KEY_VAL}" && "${_cfg_apikey}" != "${API_KEY_VAL}" ]]; then
-    warn "API key changed — regenerating config"
-    rm -f "${CONFIG_FILE}"
+  fi
+  # API key rotation: patch model.api_key in place so a rotated key never
+  # wipes a user-customized model (the old `rm -f config` regen discarded it).
+  if [[ -f "${CONFIG_FILE}" && -n "${API_KEY_VAL}" ]]; then
+    _cfg_apikey=$(grep -E '^  api_key:' "${CONFIG_FILE}" | head -1 | sed 's/.*api_key:[[:space:]]*//' | tr -d '"' || true)
+    if [[ "${_cfg_apikey}" != "${API_KEY_VAL}" ]]; then
+      log "API key changed — patching model.api_key (preserving rest of config)"
+      CONFIG_FILE="${CONFIG_FILE}" API_KEY_VAL="${API_KEY_VAL}" python3 - << 'PYEOF'
+import os, re
+p = os.environ["CONFIG_FILE"]
+s = open(p).read()
+s = re.sub(r'(?m)^(\s*api_key:\s*).*$', r'\1"' + os.environ["API_KEY_VAL"] + '"', s, count=1)
+open(p, "w").write(s)
+PYEOF
+    fi
   fi
 fi
 
