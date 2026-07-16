@@ -38,20 +38,22 @@ export default function AnaSessionsPage() {
     void load();
   }, [load]);
 
-  const run = (id: string, fn: () => Promise<unknown>) => async () => {
+  const run = (id: string, fn: () => Promise<unknown>) => {
     setActing((s) => new Set(s).add(id));
-    try {
-      await fn();
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setActing((s) => {
-        const n = new Set(s);
-        n.delete(id);
-        return n;
-      });
-    }
+    (async () => {
+      try {
+        await fn();
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setActing((s) => {
+          const n = new Set(s);
+          n.delete(id);
+          return n;
+        });
+      }
+    })();
   };
 
   const onRename = (s: AnaSession) => {

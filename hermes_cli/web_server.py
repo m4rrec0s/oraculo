@@ -3099,7 +3099,11 @@ async def get_ana_sessions(limit: int = 50, offset: int = 0):
 
 
 @app.post("/api/admin/ana-sessions/{session_id}/rename")
-async def rename_ana_session(session_id: str, body: dict):
+async def rename_ana_session(session_id: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     name = (body or {}).get("name", "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name required")
