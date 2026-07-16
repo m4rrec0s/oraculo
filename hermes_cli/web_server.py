@@ -155,6 +155,7 @@ def _ana_sessions_query(limit: int = 50, offset: int = 0):
         cur = conn.cursor()
         cur.execute(
             """SELECT s.cell, s.session_id, s.status, s.message_count,
+                      COALESCE(s.metadata->>'name', s.cell) AS session_label,
                       s.last_message_at, s.created_at, s.metadata,
                       (SELECT content FROM ana_messages m
                        WHERE m.session_id = s.session_id
@@ -3095,6 +3096,87 @@ async def get_ana_sessions(limit: int = 50, offset: int = 0):
     if rows is None:
         raise HTTPException(status_code=503, detail="Ana sessions store unavailable")
     return {"sessions": rows, "limit": limit, "offset": offset}
+
+
+@app.post("/api/admin/ana-sessions/{session_id}/rename")
+async def rename_ana_session(session_id: str, body: dict):
+    name = (body or {}).get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    conn = _ana_pg_conn()
+    if conn is None:
+        raise HTTPException(status_code=503, detail="Ana sessions store unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE ana_sessions
+               SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{name}', to_jsonb(%s))
+               WHERE session_id = %s""",
+            (name, session_id),
+        )
+        ok = cur.rowcount
+        conn.commit()
+        cur.close(); conn.close()
+        if ok == 0:
+            raise HTTPException(status_code=404, detail="session not found")
+        return {"ok": True, "session_id": session_id, "name": name}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("Ana session rename failed")
+        try: conn.close()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/admin/ana-sessions/{session_id}/toggle")
+async def toggle_ana_session(session_id: str):
+    conn = _ana_pg_conn()
+    if conn is None:
+        raise HTTPException(status_code=503, detail="Ana sessions store unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT status FROM ana_sessions WHERE session_id = %s", (session_id,))
+        row = cur.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        new = "archived" if row[0] == "active" else "active"
+        cur.execute(
+            "UPDATE ana_sessions SET status = %s, updated_at = NOW() WHERE session_id = %s",
+            (new, session_id),
+        )
+        conn.commit()
+        cur.close(); conn.close()
+        return {"ok": True, "session_id": session_id, "status": new}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("Ana session toggle failed")
+        try: conn.close()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/admin/ana-sessions/{session_id}/delete")
+async def delete_ana_session(session_id: str):
+    conn = _ana_pg_conn()
+    if conn is None:
+        raise HTTPException(status_code=503, detail="Ana sessions store unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM ana_messages WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM ana_sessions WHERE session_id = %s", (session_id,))
+        conn.commit()
+        cur.close(); conn.close()
+        return {"ok": True, "session_id": session_id}
+    except Exception as exc:
+        _log.exception("Ana session delete failed")
+        try: conn.close()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/portal")

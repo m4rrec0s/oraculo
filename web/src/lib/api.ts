@@ -1194,6 +1194,25 @@ export const api = {
     fetchJSON<AnaSessionsResponse>(
       `/api/admin/ana-sessions?limit=${limit}&offset=${offset}`,
     ),
+  renameAnaSession: (sessionId: string, name: string) =>
+    fetchJSON<{ ok: boolean }>(
+      `/api/admin/ana-sessions/${encodeURIComponent(sessionId)}/rename`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      },
+    ),
+  toggleAnaSession: (sessionId: string) =>
+    fetchJSON<{ ok: boolean; status: string }>(
+      `/api/admin/ana-sessions/${encodeURIComponent(sessionId)}/toggle`,
+      { method: "POST" },
+    ),
+  deleteAnaSession: (sessionId: string) =>
+    fetchJSON<{ ok: boolean }>(
+      `/api/admin/ana-sessions/${encodeURIComponent(sessionId)}/delete`,
+      { method: "POST" },
+    ),
 
   // ── Admin: Portal ───────────────────────────────────────────────────
   getPortal: () => fetchJSON<PortalStatus>("/api/portal"),
@@ -1392,6 +1411,7 @@ export interface AnaSession {
   session_id: string;
   status: string;
   message_count: number;
+  session_label?: string;
   last_message_at: string | null;
   created_at: string | null;
   metadata: Record<string, unknown>;
