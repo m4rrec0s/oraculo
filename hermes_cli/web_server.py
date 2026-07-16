@@ -155,12 +155,13 @@ def _ana_sessions_query(limit: int = 50, offset: int = 0):
         cur = conn.cursor()
         cur.execute(
             """SELECT s.cell, s.session_id, s.status, s.message_count,
-                      COALESCE(s.metadata->>'name', s.cell) AS session_label,
+                      COALESCE(s.metadata->>'name', c.name, s.cell) AS session_label,
                       s.last_message_at, s.created_at, s.metadata,
                       (SELECT content FROM ana_messages m
                        WHERE m.session_id = s.session_id
                        ORDER BY m.created_at DESC LIMIT 1) AS last_message
                FROM ana_sessions s
+               LEFT JOIN ana_customers c ON s.cell = c.cell
                ORDER BY s.last_message_at DESC NULLS LAST
                LIMIT %s OFFSET %s""",
             (limit, offset),
@@ -3114,7 +3115,7 @@ async def rename_ana_session(session_id: str, request: Request):
         cur = conn.cursor()
         cur.execute(
             """UPDATE ana_sessions
-               SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{name}', to_jsonb(%s))
+               SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{name}', to_jsonb(%s::text))
                WHERE session_id = %s""",
             (name, session_id),
         )
@@ -3145,7 +3146,7 @@ async def toggle_ana_session(session_id: str):
         row = cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="session not found")
-        new = "archived" if row[0] == "active" else "active"
+        new = "closed" if row[0] == "active" else "active"
         cur.execute(
             "UPDATE ana_sessions SET status = %s, updated_at = NOW() WHERE session_id = %s",
             (new, session_id),

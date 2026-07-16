@@ -118,7 +118,7 @@ async def init_schema() -> None:
 # Sessões da Ana
 # ---------------------------------------------------------------------------
 
-async def get_or_create_session(cell: str) -> Dict[str, Any]:
+async def get_or_create_session(cell: str, name: str = None) -> Dict[str, Any]:
     """Busca ou cria sessão para o cliente (cell).
     
     Retorna dict com session_id e metadata.
@@ -157,8 +157,8 @@ async def get_or_create_session(cell: str) -> Dict[str, Any]:
         
         await conn.execute("""
             INSERT INTO ana_sessions (cell, session_id, status, metadata)
-            VALUES ($1, $2, 'active', '{}')
-        """, cell, session_id)
+            VALUES ($1, $2, 'active', $3)
+        """, cell, session_id, json.dumps({"name": name}) if name else "{}")
         
         return {
             "session_id": session_id,
