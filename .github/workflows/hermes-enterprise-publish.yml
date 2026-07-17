@@ -16,16 +16,18 @@ jobs:
   sync-check:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (with history)
-        uses: actions/checkout@v4
+      - name: Checkout (with history + tags)
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Configure git
         run: |
           git config user.name "sync-bot"
           git config user.email "sync@cesto.local"
           git remote add upstream https://github.com/NousResearch/hermes-agent.git || true
+          git fetch upstream --tags main
 
       - name: Scan upstream for collisions (blocks on protected files)
         run: bash scripts/sync_upstream.sh upstream main
@@ -35,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
