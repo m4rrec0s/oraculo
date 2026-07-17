@@ -13,7 +13,25 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}/hermes-enterprise
 
 jobs:
+  sync-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "sync-bot"
+          git config user.email "sync@cesto.local"
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git || true
+
+      - name: Scan upstream for collisions (blocks on protected files)
+        run: bash scripts/sync_upstream.sh upstream main
+
   build:
+    needs: sync-check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
