@@ -4808,40 +4808,43 @@ class APIServerAdapter(BasePlatformAdapter):
 
     def _persist_ana_turn(self, session_key: str, user_msg: str, assistant_msg: str) -> None:
         """Upsert the Ana session + append user/assistant messages to the
-        dedicated Hermes Postgres (``HERMES_PG_*``). Best-effort: any failure is
-        swallowed so a DB hiccup never breaks the customer turn."""
+        dedicated Hermes Postgres (``DATABASE_URL`` — internal swarm DSN).
+        Best-effort: any failure is swallowed so a DB hiccup never breaks the
+        customer turn. The ``persona`` column is set from ``ENTERPRISE_PROFILE``
+        so each container (atendimento, hermes-honda-atendimento, ...) scopes
+        its own sessions even when the same cell hits multiple personas."""
         import os
         import re
         try:
             import pg8000
         except ImportError:
+            logger.debug("ana persist skipped: pg8000 not installed")
             return
-        host = os.environ.get("HERMES_PG_HOST")
-        if not host:
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            logger.debug("ana persist skipped: DATABASE_URL not set")
             return
+        persona = os.environ.get("ENTERPRISE_PROFILE", "atendimento")
         cell = re.sub(r"\D", "", str(session_key))[:20]
         sid = str(session_key)
         try:
-            conn = pg8000.connect(
-                host=host,
-                port=int(os.environ.get("HERMES_PG_PORT", "5432")),
-                database=os.environ.get("HERMES_PG_DATABASE", "hermes_enterprise"),
-                user=os.environ.get("HERMES_PG_USER", "hermes"),
-                password=os.environ.get("HERMES_PG_PASSWORD", ""),
-            )
+            conn = pg8000.connect(dsn=dsn)
             cur = conn.cursor()
             cur.execute(
-                """INSERT INTO ana_sessions (cell, session_id, status, last_message_at, message_count, updated_at)
-                   VALUES (%s, %s, 'active', NOW(), 1, NOW())
+                """INSERT INTO ana_sessions (persona, cell, session_id, status, last_message_at, message_count, updated_at)
+                   VALUES (%(persona)s, %(cell)s, %(sid)s, 'active', NOW(), 1, NOW())
                    ON CONFLICT (session_id) DO UPDATE SET
+                     persona = %(persona)s,
                      last_message_at = NOW(), updated_at = NOW(),
                      message_count = ana_sessions.message_count + 1,
                      status = CASE WHEN ana_sessions.status = 'archived' THEN 'active' ELSE ana_sessions.status END""",
-                (cell, sid),
+                {"persona": persona, "cell": cell, "sid": sid},
             )
             cur.execute(
-                "INSERT INTO ana_messages (session_id, role, content, created_at) VALUES (%s, 'user', %s, NOW()), (%s, 'assistant', %s, NOW())",
-                (sid, user_msg, sid, assistant_msg),
+                """INSERT INTO ana_messages (persona, session_id, role, content, created_at)
+                   VALUES (%(persona)s, %(sid)s, 'user', %(um)s, NOW()),
+                          (%(persona)s, %(sid)s, 'assistant', %(am)s, NOW())""",
+                {"persona": persona, "sid": sid, "um": user_msg, "am": assistant_msg},
             )
             conn.commit()
             cur.close()

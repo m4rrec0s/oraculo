@@ -20,20 +20,28 @@ router = APIRouter(prefix="/api/admin", tags=["persona"])
 
 
 def _persona_pg_conn():
-    """Connect to the Hermes Postgres via ``DATABASE_URL`` (internal swarm DSN) or None."""
+    """Connect to the Hermes Postgres via ``DATABASE_URL`` (internal swarm DSN).
+
+    Returns a ``(conn, err)`` tuple: ``conn`` is the live connection or ``None``,
+    ``err`` is a short human-readable reason (no credentials) when ``conn`` is
+    ``None``. The specific reason is also logged.
+    """
     try:
         import pg8000
     except ImportError:
-        return None
+        _log.error("Persona PG connect failed: pg8000 not installed")
+        return (None, "pg8000 driver not installed")
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
-        return None
+        _log.error("Persona PG connect failed: DATABASE_URL not set in environment")
+        return (None, "DATABASE_URL not set")
     try:
         # pg8000 accepts a postgres:// DSN via the `dsn` kwarg.
-        return pg8000.connect(dsn=dsn)
-    except Exception:
-        _log.exception("Persona PG connect failed")
-        return None
+        return (pg8000.connect(dsn=dsn), None)
+    except Exception as exc:
+        # Avoid leaking the DSN (may contain password) — log type + message only.
+        _log.error("Persona PG connect failed: %s: %s", type(exc).__name__, str(exc)[:200])
+        return (None, f"{type(exc).__name__}: {str(exc)[:120]}")
 
 
 def _persona_sessions_query(persona: str = None, limit: int = 50, offset: int = 0):
@@ -42,7 +50,7 @@ def _persona_sessions_query(persona: str = None, limit: int = 50, offset: int = 
     When ``persona`` is given, only that persona's sessions are returned.
     Otherwise ALL personas are listed (admin sees everything).
     """
-    conn = _persona_pg_conn()
+    conn, err = _persona_pg_conn()
     if conn is None:
         return None
     try:
@@ -86,7 +94,8 @@ async def get_persona_sessions(persona: str = None, limit: int = 50, offset: int
     """
     rows = _persona_sessions_query(persona, limit, offset)
     if rows is None:
-        raise HTTPException(status_code=503, detail="Persona sessions store unavailable")
+        _, err = _persona_pg_conn()
+        raise HTTPException(status_code=503, detail=f"Persona sessions store unavailable: {err or 'unknown'}")
     return {"sessions": rows, "persona": persona, "limit": limit, "offset": offset}
 
 
@@ -96,9 +105,9 @@ async def get_persona_personas():
 
     Used by the dashboard to render the persona picker before listing sessions.
     """
-    conn = _persona_pg_conn()
+    conn, err = _persona_pg_conn()
     if conn is None:
-        raise HTTPException(status_code=503, detail="Persona sessions store unavailable")
+        raise HTTPException(status_code=503, detail=f"Persona sessions store unavailable: {err or 'unknown'}")
     try:
         cur = conn.cursor()
         cur.execute(
@@ -130,9 +139,9 @@ async def rename_persona_session(session_id: str, request: Request):
     name = (body or {}).get("name", "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name required")
-    conn = _persona_pg_conn()
+    conn, err = _persona_pg_conn()
     if conn is None:
-        raise HTTPException(status_code=503, detail="Persona sessions store unavailable")
+        raise HTTPException(status_code=503, detail=f"Persona sessions store unavailable: {err or 'unknown'}")
     try:
         cur = conn.cursor()
         cur.execute(
@@ -159,9 +168,9 @@ async def rename_persona_session(session_id: str, request: Request):
 
 @router.post("/persona-sessions/{session_id}/toggle")
 async def toggle_persona_session(session_id: str):
-    conn = _persona_pg_conn()
+    conn, err = _persona_pg_conn()
     if conn is None:
-        raise HTTPException(status_code=503, detail="Persona sessions store unavailable")
+        raise HTTPException(status_code=503, detail=f"Persona sessions store unavailable: {err or 'unknown'}")
     try:
         cur = conn.cursor()
         cur.execute("SELECT status FROM ana_sessions WHERE session_id = %s", (session_id,))
@@ -188,9 +197,9 @@ async def toggle_persona_session(session_id: str):
 
 @router.post("/persona-sessions/{session_id}/delete")
 async def delete_persona_session(session_id: str):
-    conn = _persona_pg_conn()
+    conn, err = _persona_pg_conn()
     if conn is None:
-        raise HTTPException(status_code=503, detail="Persona sessions store unavailable")
+        raise HTTPException(status_code=503, detail=f"Persona sessions store unavailable: {err or 'unknown'}")
     try:
         cur = conn.cursor()
         cur.execute("DELETE FROM ana_messages WHERE session_id = %s", (session_id,))
