@@ -142,7 +142,7 @@ export default function AtendimentoPage() {
                 return (
                   <Button
                     key={p.persona}
-                    variant={active ? "default" : "outline"}
+                    ghost={!active}
                     size="sm"
                     onClick={() => selectPersona(p.persona)}
                     className={active ? "" : "text-text-secondary"}
