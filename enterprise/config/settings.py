@@ -195,7 +195,11 @@ class EnterpriseConfig(BaseSettings):
         return cls._instance
 
     def get_profile_model(self, profile: str) -> dict[str, str]:
-        """Retorna config de modelo para um perfil."""
+        """Retorna config de modelo para um perfil.
+
+        admin → config completa; qualquer outra persona → config minimal
+        (padrão de atendimento). Perfis extras herdam o minimal.
+        """
         if profile == "admin":
             return {
                 "default": self.model_admin_default,
@@ -211,7 +215,10 @@ class EnterpriseConfig(BaseSettings):
         }
 
     def get_compression_config(self, profile: str) -> dict[str, Any]:
-        """Retorna config de compressão para um perfil."""
+        """Retorna config de compressão para um perfil.
+
+        admin → threshold admin; qualquer outra persona → threshold minimal.
+        """
         if profile == "admin":
             return {
                 "enabled": self.compression_enabled,

@@ -13,31 +13,20 @@ from typing import Any, Dict, List, Optional
 
 import asyncpg
 
-# Configuração via env (mesmo padrão do erp_server.py)
-PG_HOST = os.getenv("CESTO_PG_HOST", "easypanel.cestodamore.com.br")
-PG_PORT = int(os.getenv("CESTO_PG_PORT", "54320"))
-PG_DATABASE = os.getenv("CESTO_PG_DATABASE", "cesto_damore")
-PG_USER = os.getenv("CESTO_PG_USER", "postgres")
-PG_PASSWORD = os.getenv("CESTO_PG_PASSWORD", "")
-PG_SSL = os.getenv("CESTO_PG_SSL", "false").lower() == "true"
+# Conexão interna do swarm via DATABASE_URL (ex: postgres://...@oraculo_postgres:5432/hermes).
+# CESTO_PG_* é do e-commerce (verificações do hermes), não das sessões.
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 _pool: asyncpg.Pool | None = None
 
 
 async def get_pool() -> asyncpg.Pool:
-    """Obtém pool de conexões PostgreSQL."""
+    """Obtém pool de conexões PostgreSQL (DSN interno do swarm)."""
     global _pool
     if _pool is None or _pool.is_closed():
-        _pool = await asyncpg.create_pool(
-            host=PG_HOST,
-            port=PG_PORT,
-            database=PG_DATABASE,
-            user=PG_USER,
-            password=PG_PASSWORD,
-            ssl=PG_SSL,
-            min_size=2,
-            max_size=10,
-        )
+        if not DATABASE_URL:
+            raise RuntimeError("DATABASE_URL não definida — impossível conectar ao Postgres de sessões")
+        _pool = await asyncpg.create_pool(dsn=DATABASE_URL, min_size=2, max_size=10)
     return _pool
 
 
@@ -54,12 +43,13 @@ async def close_pool() -> None:
 # ---------------------------------------------------------------------------
 
 SCHEMA_SQL = """
--- Tabela de sessões da Ana por cliente
+-- Tabela de sessões por cliente (compartilhada entre personas)
 CREATE TABLE IF NOT EXISTS ana_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    persona VARCHAR(50) NOT NULL DEFAULT 'atendimento',  -- qual persona é dona da sessão
     cell VARCHAR(20) NOT NULL,  -- Número do cliente (ex: 5583999999999)
     session_id VARCHAR(100) UNIQUE NOT NULL,  -- ID da sessão Hermes
-    status VARCHAR(20) DEFAULT 'active',  -- active, archived, blocked
+    status VARCHAR(20) DEFAULT 'active',  -- active, closed, archived, blocked
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_message_at TIMESTAMP WITH TIME ZONE,
@@ -68,13 +58,15 @@ CREATE TABLE IF NOT EXISTS ana_sessions (
 );
 
 -- Índices para busca rápida
+CREATE INDEX IF NOT EXISTS idx_ana_sessions_persona ON ana_sessions(persona);
 CREATE INDEX IF NOT EXISTS idx_ana_sessions_cell ON ana_sessions(cell);
 CREATE INDEX IF NOT EXISTS idx_ana_sessions_status ON ana_sessions(status);
 CREATE INDEX IF NOT EXISTS idx_ana_sessions_last_message ON ana_sessions(last_message_at);
 
--- Tabela de mensagens da Ana (histórico por sessão)
+-- Tabela de mensagens (histórico por sessão)
 CREATE TABLE IF NOT EXISTS ana_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    persona VARCHAR(50) NOT NULL DEFAULT 'atendimento',  -- replica da sessão p/ filtro direto
     session_id VARCHAR(100) NOT NULL REFERENCES ana_sessions(session_id),
     role VARCHAR(20) NOT NULL,  -- user, assistant, system
     content TEXT NOT NULL,
@@ -84,13 +76,14 @@ CREATE TABLE IF NOT EXISTS ana_messages (
 );
 
 -- Índices para mensagens
+CREATE INDEX IF NOT EXISTS idx_ana_messages_persona ON ana_messages(persona);
 CREATE INDEX IF NOT EXISTS idx_ana_messages_session ON ana_messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_ana_messages_created ON ana_messages(created_at);
 
 -- Tabela de audit log para mudanças autônomas
 CREATE TABLE IF NOT EXISTS hermes_audit_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent VARCHAR(50) NOT NULL,  -- admin, ana
+    agent VARCHAR(50) NOT NULL,  -- admin, atendimento, ...
     action VARCHAR(100) NOT NULL,  -- skill_update, config_change, etc
     target VARCHAR(100),  -- skill_name, config_key, etc
     old_value JSONB,
@@ -106,34 +99,53 @@ CREATE INDEX IF NOT EXISTS idx_audit_action ON hermes_audit_log(action);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON hermes_audit_log(created_at);
 """
 
+# Migration idempotente: adiciona a coluna persona se a tabela já existir
+# (sessões criadas antes da multi-persona). Roda após o CREATE IF NOT EXISTS.
+MIGRATE_SQL = """
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name='ana_sessions' AND column_name='persona') THEN
+        ALTER TABLE ana_sessions ADD COLUMN persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
+        CREATE INDEX IF NOT EXISTS idx_ana_sessions_persona ON ana_sessions(persona);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name='ana_messages' AND column_name='persona') THEN
+        ALTER TABLE ana_messages ADD COLUMN persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
+        CREATE INDEX IF NOT EXISTS idx_ana_messages_persona ON ana_messages(persona);
+    END IF;
+END $$;
+"""
+
 
 async def init_schema() -> None:
-    """Cria tabelas se não existirem."""
+    """Cria tabelas se não existirem e aplica migration de persona."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(SCHEMA_SQL)
+        await conn.execute(MIGRATE_SQL)
 
 
 # ---------------------------------------------------------------------------
 # Sessões da Ana
 # ---------------------------------------------------------------------------
 
-async def get_or_create_session(cell: str, name: str = None) -> Dict[str, Any]:
-    """Busca ou cria sessão para o cliente (cell).
+async def get_or_create_session(persona: str, cell: str, name: str = None) -> Dict[str, Any]:
+    """Busca ou cria sessão para o cliente (cell) dentro de uma persona.
     
     Retorna dict com session_id e metadata.
     """
     pool = await get_pool()
     
     async with pool.acquire() as conn:
-        # Buscar sessão ativa existente
+        # Buscar sessão ativa existente da persona
         row = await conn.fetchrow("""
             SELECT session_id, status, metadata, created_at
             FROM ana_sessions
-            WHERE cell = $1 AND status = 'active'
+            WHERE persona = $1 AND cell = $2 AND status = 'active'
             ORDER BY last_message_at DESC NULLS LAST
             LIMIT 1
-        """, cell)
+        """, persona, cell)
         
         if row:
             # Atualizar timestamp
@@ -153,12 +165,12 @@ async def get_or_create_session(cell: str, name: str = None) -> Dict[str, Any]:
         
         # Criar nova sessão
         import uuid
-        session_id = f"ana-{cell}-{uuid.uuid4().hex[:8]}"
+        session_id = f"{persona}-{cell}-{uuid.uuid4().hex[:8]}"
         
         await conn.execute("""
-            INSERT INTO ana_sessions (cell, session_id, status, metadata)
-            VALUES ($1, $2, 'active', $3)
-        """, cell, session_id, json.dumps({"name": name}) if name else "{}")
+            INSERT INTO ana_sessions (persona, cell, session_id, status, metadata)
+            VALUES ($1, $2, $3, 'active', $4)
+        """, persona, cell, session_id, json.dumps({"name": name}) if name else "{}")
         
         return {
             "session_id": session_id,
@@ -170,20 +182,21 @@ async def get_or_create_session(cell: str, name: str = None) -> Dict[str, Any]:
 
 
 async def save_message(
+    persona: str,
     session_id: str,
     role: str,
     content: str,
     tokens_used: int = 0,
     tool_calls: List[Dict] = None,
 ) -> None:
-    """Salva mensagem na sessão."""
+    """Salva mensagem na sessão (registra persona para filtro direto)."""
     pool = await get_pool()
     
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO ana_messages (session_id, role, content, tokens_used, tool_calls)
-            VALUES ($1, $2, $3, $4, $5)
-        """, session_id, role, content, tokens_used, json.dumps(tool_calls or []))
+            INSERT INTO ana_messages (persona, session_id, role, content, tokens_used, tool_calls)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        """, persona, session_id, role, content, tokens_used, json.dumps(tool_calls or []))
         
         # Atualizar contadores da sessão
         await conn.execute("""
@@ -237,30 +250,49 @@ async def archive_session(session_id: str) -> None:
         """, session_id)
 
 
-async def get_session_stats(cell: str = None) -> Dict[str, Any]:
-    """Retorna estatísticas das sessões."""
+async def get_session_stats(persona: str = None, cell: str = None) -> Dict[str, Any]:
+    """Retorna estatísticas das sessões (filtra por persona e/ou cell)."""
     pool = await get_pool()
     
     async with pool.acquire() as conn:
         if cell:
-            row = await conn.fetchrow("""
+            query = """
                 SELECT 
                     COUNT(*) as total_sessions,
                     SUM(message_count) as total_messages,
                     MAX(last_message_at) as last_activity
                 FROM ana_sessions
                 WHERE cell = $1
-            """, cell)
+            """
+            params = [cell]
+            if persona:
+                query = query.replace("WHERE cell = $1", "WHERE persona = $2 AND cell = $1")
+                params = [cell, persona]
         else:
-            row = await conn.fetchrow("""
-                SELECT 
-                    COUNT(*) as total_sessions,
-                    SUM(message_count) as total_messages,
-                    COUNT(DISTINCT cell) as unique_clients,
-                    MAX(last_message_at) as last_activity
-                FROM ana_sessions
-            """)
+            if persona:
+                query = """
+                    SELECT 
+                        COUNT(*) as total_sessions,
+                        SUM(message_count) as total_messages,
+                        COUNT(DISTINCT cell) as unique_clients,
+                        MAX(last_message_at) as last_activity
+                    FROM ana_sessions
+                    WHERE persona = $1
+                """
+                params = [persona]
+            else:
+                query = """
+                    SELECT 
+                        COUNT(*) as total_sessions,
+                        SUM(message_count) as total_messages,
+                        COUNT(DISTINCT cell) as unique_clients,
+                        COUNT(DISTINCT persona) as personas,
+                        MAX(last_message_at) as last_activity
+                    FROM ana_sessions
+                """
+                params = []
         
+        row = await conn.fetchrow(query, *params)
         return dict(row) if row else {}
 
 

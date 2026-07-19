@@ -89,18 +89,18 @@ async def test_ana_sessions():
         
         # Teste 1: Criar sessão
         cell = "5583999999999"
-        session = await get_or_create_session(cell)
+        session = await get_or_create_session("atendimento", cell)
         print(f"✓ Sessão criada: {session['session_id']}")
         assert session["is_new"] == True
         
         # Teste 2: Buscar mesma sessão
-        session2 = await get_or_create_session(cell)
+        session2 = await get_or_create_session("atendimento", cell)
         print(f"✓ Sessão encontrada: {session2['session_id']}")
         assert session2["session_id"] == session["session_id"]
         assert session2["is_new"] == False
         
         # Teste 3: Salvar mensagem
-        await save_message(session["session_id"], "user", "Oi, quero comprar")
+        await save_message("atendimento", session["session_id"], "user", "Oi, quero comprar")
         print("✓ Mensagem salva")
         
         # Teste 4: Buscar histórico

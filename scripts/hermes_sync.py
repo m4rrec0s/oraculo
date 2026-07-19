@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
 """Local Hermes upstream sync helper (Cesto Agent).
 
-Compares the local fork against NousResearch/hermes-agent, detects collisions
-against Cesto's protected files, and optionally merges upstream when safe.
+Designed for a repo that is NOT a GitHub fork of NousResearch/hermes-agent
+(we added the upstream remote manually). Because there is no shared git
+history, `git merge`/`rebase` produce add/add conflicts on every file.
 
-State is persisted in UPSTREAM_SYNC (the last upstream tag we synced to).
+Strategy: selective `git checkout upstream/main -- <file>` for files we do
+NOT own. Our protected files are left untouched, so our Ana/session/custom
+surface is preserved while the core tracks upstream.
+
+State persisted in UPSTREAM_SYNC (commit hash of last synced upstream tip).
 
 Usage:
     python3 scripts/hermes_sync.py check   # analyze only, no changes
-    python3 scripts/hermes_sync.py sync    # merge upstream/main if no collision
+    python3 scripts/hermes_sync.py sync    # pull upstream into non-protected files
 
 Exit codes:
-    0  up to date, or sync succeeded (no collision)
-    1  collision detected (sync aborted)
+    0  up to date, or sync succeeded
+    1  errors during sync (some files failed)
     2  git/network error
 """
 
@@ -30,7 +35,7 @@ REMOTE = "upstream"
 BRANCH = "main"
 UPSTREAM_REF = f"{REMOTE}/{BRANCH}"
 
-# Files we OWN. Upstream edits here => collision, sync aborts for manual review.
+# Files we OWN. Never overwritten by sync. Upstream edits here => warning only.
 PROTECTED = (
     "enterprise/",
     "skills/cesto-damore/",
@@ -40,16 +45,17 @@ PROTECTED = (
     "web/src/pages/AnaSessionsPage.tsx",
 )
 
+# Anchor: the release tag this repo was cut from.
+BASE_TAG = "v2026.7.7.2"
+
 
 def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
-        cmd, cwd=REPO, capture_output=True, text=True,
-        check=check,
+        cmd, cwd=REPO, capture_output=True, text=True, check=check
     )
 
 
 def _latest_upstream_tag() -> str | None:
-    """Newest semver-ish tag on upstream (e.g. v2026.7.7.2)."""
     r = _run(["git", "tag", "--sort=-creatordate"], check=False)
     if r.returncode != 0:
         return None
@@ -66,19 +72,21 @@ def _read_state() -> str:
     return ""
 
 
-def _write_state(tag: str) -> None:
-    STATE_FILE.write_text(tag + "\n")
+def _write_state(ref: str) -> None:
+    STATE_FILE.write_text(ref + "\n")
 
 
 def _protected_pattern() -> str:
-    return "^(?:" + "|".join(PROTECTED) + ")"
+    return "^(?:" + "|".join(re.escape(p) for p in PROTECTED) + ")"
 
 
-def _same_commit(a: str, b: str) -> bool:
-    """True if git refs a and b point at the same commit."""
-    ra = _run(["git", "rev-parse", a], check=False)
-    rb = _run(["git", "rev-parse", b], check=False)
-    return ra.returncode == 0 and rb.returncode == 0 and ra.stdout.strip() == rb.stdout.strip()
+def _changed_files(base: str) -> list[str]:
+    r = _run(
+        ["git", "diff", "--name-only", f"{base}..{UPSTREAM_REF}"], check=False
+    )
+    if r.returncode != 0:
+        return []
+    return [l for l in r.stdout.splitlines() if l.strip()]
 
 
 def check() -> int:
@@ -92,68 +100,83 @@ def check() -> int:
         print("✗ no upstream tags found", file=sys.stderr)
         return 2
 
-    base = _read_state()
-    target = UPSTREAM_REF
+    base = _read_state() or BASE_TAG
+    print(f"==> Upstream tip {UPSTREAM_REF} (base: {base})")
 
-    # First run (no state): anchor on the release tag this fork was cut from,
-    # not HEAD — the fork diverged from upstream so HEAD..upstream is huge.
-    if not base:
-        base = latest
-        print(f"==> No sync state; anchoring on release tag {latest}")
-
-    if base == target or _same_commit(base, target):
-        print(f"✓ Already synced to upstream tip ({target}). Nothing to do.")
-        _write_state(_run(["git", "rev-parse", target]).stdout.strip())
-        return 0
-
-    print(f"==> Upstream tip {target} (synced base: {base})")
-
-    # Files upstream changed since the base tag.
-    merge_base = base
-    r = _run(["git", "diff", "--name-only", f"{merge_base}..{UPSTREAM_REF}"], check=False)
-    if r.returncode != 0:
-        print(f"✗ diff failed (base {merge_base} may be invalid)", file=sys.stderr)
-        return 2
-
-    changed = [l for l in r.stdout.splitlines() if l.strip()]
+    changed = _changed_files(base)
     if not changed:
-        print(f"✓ Upstream has no file changes vs {merge_base}.")
-        _write_state(_run(["git", "rev-parse", target]).stdout.strip())
+        print("✓ No upstream file changes since base. Already up to date.")
+        _write_state(_run(["git", "rev-parse", UPSTREAM_REF]).stdout.strip())
         return 0
 
     pat = re.compile(_protected_pattern())
-    collide = [f for f in changed if pat.match(f)]
+    protected_hits = [f for f in changed if pat.match(f)]
+    free = [f for f in changed if not pat.match(f)]
 
-    if collide:
-        print("⚠ COLLISION — upstream modified protected files:", file=sys.stderr)
-        for f in collide:
+    print(f"✓ {len(changed)} upstream file(s) changed "
+          f"({len(free)} updatable, {len(protected_hits)} protected).")
+    if protected_hits:
+        print("⚠ Upstream also touched PROTECTED files (left untouched):",
+              file=sys.stderr)
+        for f in protected_hits:
             print(f"   - {f}", file=sys.stderr)
-        print("✗ Sync aborted. Review manually.", file=sys.stderr)
-        return 1
-
-    print(f"✓ No collision. {len(changed)} upstream file(s) changed, "
-          f"none in protected set.")
-    print(f"   Ready to sync to {target}. Run: python3 scripts/hermes_sync.py sync")
+        print("  Review manually — your version is kept.", file=sys.stderr)
+    print(f"   Run sync to pull the {len(free)} updatable file(s).")
     return 0
 
 
 def sync() -> int:
-    rc = check()
-    if rc != 0:
-        return rc
+    print("==> Fetching upstream...")
+    if _run(["git", "fetch", REMOTE, BRANCH, "--tags"], check=False).returncode != 0:
+        print("✗ fetch failed", file=sys.stderr)
+        return 2
 
-    latest = _latest_upstream_tag()
-    print(f"==> Merging {UPSTREAM_REF}...")
-    r = _run(["git", "merge", UPSTREAM_REF, "--no-edit"], check=False)
-    if r.returncode != 0:
-        print("✗ Merge failed (conflicts?). Aborting.", file=sys.stderr)
-        print(r.stdout, file=sys.stderr)
-        print(r.stderr, file=sys.stderr)
-        return 1
+    base = _read_state() or BASE_TAG
+    changed = _changed_files(base)
+    if not changed:
+        print("✓ Already up to date.")
+        _write_state(_run(["git", "rev-parse", UPSTREAM_REF]).stdout.strip())
+        return 0
+
+    pat = re.compile(_protected_pattern())
+    free = [f for f in changed if not pat.match(f)]
+    protected_hits = [f for f in changed if pat.match(f)]
+
+    if not free:
+        print("✓ Only protected files changed upstream; nothing to pull.")
+        _write_state(_run(["git", "rev-parse", UPSTREAM_REF]).stdout.strip())
+        return 0
+
+    print(f"==> Pulling {len(free)} upstream file(s) (protected kept)...")
+    pulled = 0
+    removed = 0
+    skipped = 0
+    for f in free:
+        # Exists in upstream tip? -> checkout. Deleted upstream? -> rm here.
+        has = _run(["git", "cat-file", "-e", f"{UPSTREAM_REF}:{f}"], check=False)
+        if has.returncode == 0:
+            r = _run(["git", "checkout", UPSTREAM_REF, "--", f], check=False)
+            if r.returncode == 0:
+                pulled += 1
+            else:
+                skipped += 1
+                print(f"   ! checkout failed: {f}", file=sys.stderr)
+        else:
+            # Upstream removed this file; mirror the deletion.
+            rr = _run(["git", "rm", "-f", "--ignore-unmatch", f], check=False)
+            if rr.returncode == 0 and rr.stdout.strip():
+                removed += 1
+            else:
+                skipped += 1
+
+    if protected_hits:
+        print(f"⚠ {len(protected_hits)} protected file(s) left as-is "
+              f"(upstream changed them, yours kept).", file=sys.stderr)
 
     _write_state(_run(["git", "rev-parse", UPSTREAM_REF]).stdout.strip())
-    print(f"✓ Synced to {latest}. Review the diff, then push & deploy when ready.")
-    return 0
+    print(f"✓ Synced: {pulled} pulled, {removed} removed, {skipped} skipped.")
+    print("   Review diff, then commit/push when ready.")
+    return 0 if skipped == 0 else 1
 
 
 def main() -> int:

@@ -52,15 +52,15 @@ async def read_agent_sessions(
         
         async with pool.acquire() as conn:
             # Buscar sessões do agente
-            if agent_profile == "ana":
+            if agent_profile == "ana" or agent_profile == "atendimento":
                 rows = await conn.fetch("""
-                    SELECT session_id, cell, status, message_count, 
+                    SELECT session_id, persona, cell, status, message_count, 
                            last_message_at, created_at
                     FROM ana_sessions
-                    WHERE status = 'active'
+                    WHERE persona = $2 AND status = 'active'
                     ORDER BY last_message_at DESC
                     LIMIT $1
-                """, limit)
+                """, limit, agent_profile)
                 
                 return [dict(row) for row in rows]
             

@@ -1189,28 +1189,31 @@ export const api = {
   runCurator: () =>
     fetchJSON<ActionResponse>("/api/curator/run", { method: "POST" }),
 
-  // ── Admin: Ana sessions (dashboard, Hermes PG dedicado) ───────────────
-  getAnaSessions: (limit = 50, offset = 0) =>
-    fetchJSON<AnaSessionsResponse>(
-      `/api/admin/ana-sessions?limit=${limit}&offset=${offset}`,
+  // ── Admin: Persona sessions (dashboard, Hermes PG dedicado) ──────────
+  getPersonaPersonas: () =>
+    fetchJSON<PersonaPersonasResponse>("/api/admin/persona-personas"),
+  getPersonaSessions: (persona?: string, limit = 50, offset = 0) =>
+    fetchJSON<PersonaSessionsResponse>(
+      `/api/admin/persona-sessions?limit=${limit}&offset=${offset}` +
+        (persona ? `&persona=${encodeURIComponent(persona)}` : ""),
     ),
-  renameAnaSession: (sessionId: string, name: string) =>
+  renamePersonaSession: (sessionId: string, name: string) =>
     fetchJSON<{ ok: boolean }>(
-      `/api/admin/ana-sessions/${encodeURIComponent(sessionId)}/rename`,
+      `/api/admin/persona-sessions/${encodeURIComponent(sessionId)}/rename`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       },
     ),
-  toggleAnaSession: (sessionId: string) =>
+  togglePersonaSession: (sessionId: string) =>
     fetchJSON<{ ok: boolean; status: string }>(
-      `/api/admin/ana-sessions/${encodeURIComponent(sessionId)}/toggle`,
+      `/api/admin/persona-sessions/${encodeURIComponent(sessionId)}/toggle`,
       { method: "POST" },
     ),
-  deleteAnaSession: (sessionId: string) =>
+  deletePersonaSession: (sessionId: string) =>
     fetchJSON<{ ok: boolean }>(
-      `/api/admin/ana-sessions/${encodeURIComponent(sessionId)}/delete`,
+      `/api/admin/persona-sessions/${encodeURIComponent(sessionId)}/delete`,
       { method: "POST" },
     ),
 
@@ -1406,7 +1409,8 @@ export interface SkillHubScan {
 
 // ── Admin types ───────────────────────────────────────────────────────
 
-export interface AnaSession {
+export interface PersonaSession {
+  persona?: string;
   cell: string;
   session_id: string;
   status: string;
@@ -1418,10 +1422,20 @@ export interface AnaSession {
   last_message: string | null;
 }
 
-export interface AnaSessionsResponse {
-  sessions: AnaSession[];
+export interface PersonaSessionsResponse {
+  sessions: PersonaSession[];
+  persona?: string | null;
   limit: number;
   offset: number;
+}
+
+export interface PersonaInfo {
+  persona: string;
+  session_count: number;
+}
+
+export interface PersonaPersonasResponse {
+  personas: PersonaInfo[];
 }
 
 export interface McpServer {

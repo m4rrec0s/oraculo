@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Users, RefreshCw, MessageSquare, Pencil, Power, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import type { AnaSession, AnaSessionsResponse } from "@/lib/api";
+import type { PersonaSession, PersonaSessionsResponse, PersonaInfo } from "@/lib/api";
 import { isoTimeAgo } from "@/lib/utils";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Button } from "@nous-research/ui/ui/components/button";
@@ -13,30 +13,58 @@ const STATUS_TONE: Record<string, string> = {
   blocked: "text-destructive",
 };
 
-export default function AnaSessionsPage() {
-  const [sessions, setSessions] = useState<AnaSession[]>([]);
+export default function AtendimentoPage() {
+  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
+  const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<PersonaSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [personasLoading, setPersonasLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState<Set<string>>(new Set());
   const limit = 50;
   const [offset, setOffset] = useState(0);
 
+  const loadPersonas = useCallback(async () => {
+    setPersonasLoading(true);
+    try {
+      const data = await api.getPersonaPersonas();
+      const list = data.personas ?? [];
+      setPersonas(list);
+      // Auto-seleciona a primeira persona se nenhuma estiver selecionada
+      setSelectedPersona((cur) => cur ?? list[0]?.persona ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPersonasLoading(false);
+    }
+  }, []);
+
   const load = useCallback(async () => {
+    if (!selectedPersona) return;
     setLoading(true);
     setError(null);
     try {
-      const data: AnaSessionsResponse = await api.getAnaSessions(limit, offset);
+      const data: PersonaSessionsResponse = await api.getPersonaSessions(selectedPersona, limit, offset);
       setSessions(data.sessions ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [limit, offset]);
+  }, [selectedPersona, limit, offset]);
+
+  useEffect(() => {
+    void loadPersonas();
+  }, [loadPersonas]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const selectPersona = (p: string) => {
+    setSelectedPersona(p);
+    setOffset(0);
+  };
 
   const run = (id: string, fn: () => Promise<unknown>) => {
     setActing((s) => new Set(s).add(id));
@@ -56,18 +84,18 @@ export default function AnaSessionsPage() {
     })();
   };
 
-  const onRename = (s: AnaSession) => {
+  const onRename = (s: PersonaSession) => {
     const name = window.prompt("Novo nome da sessão:", s.session_label || s.cell);
     if (name === null) return;
     const trimmed = name.trim();
     if (!trimmed) return;
-    return run(s.session_id, () => api.renameAnaSession(s.session_id, trimmed));
+    return run(s.session_id, () => api.renamePersonaSession(s.session_id, trimmed));
   };
-  const onToggle = (s: AnaSession) =>
-    run(s.session_id, () => api.toggleAnaSession(s.session_id));
-  const onDelete = (s: AnaSession) => {
+  const onToggle = (s: PersonaSession) =>
+    run(s.session_id, () => api.togglePersonaSession(s.session_id));
+  const onDelete = (s: PersonaSession) => {
     if (!window.confirm(`Excluir sessão ${s.session_id}?`)) return;
-    return run(s.session_id, () => api.deleteAnaSession(s.session_id));
+    return run(s.session_id, () => api.deletePersonaSession(s.session_id));
   };
 
   return (
@@ -76,18 +104,58 @@ export default function AnaSessionsPage() {
         <div className="flex items-center gap-2">
           <Users className="h-5 w-5 text-midground" />
           <h2 className="font-mondwest text-display uppercase tracking-[0.12em] text-midground">
-            Sessões da Ana
+            Atendimento
           </h2>
         </div>
         <Button
           ghost
           size="icon"
-          onClick={() => void load()}
+          onClick={() => {
+            void loadPersonas();
+            void load();
+          }}
           aria-label="Atualizar"
         >
           <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
         </Button>
       </div>
+
+      {/* Passo 1: escolher persona */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-mondwest text-display uppercase tracking-[0.12em]">
+            Personas
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {personasLoading ? (
+            <div className="flex items-center gap-2 text-sm text-text-secondary">
+              <Spinner />
+              <span>Carregando personas…</span>
+            </div>
+          ) : personas.length === 0 ? (
+            <p className="text-text-secondary text-sm">Nenhuma persona com sessões ainda.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {personas.map((p) => {
+                const active = p.persona === selectedPersona;
+                return (
+                  <Button
+                    key={p.persona}
+                    variant={active ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => selectPersona(p.persona)}
+                    className={active ? "" : "text-text-secondary"}
+                  >
+                    {p.persona}
+                    <span className="ml-2 text-xs opacity-70">{p.session_count}</span>
+                  </Button>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {error && (
         <Card>
@@ -95,7 +163,13 @@ export default function AnaSessionsPage() {
         </Card>
       )}
 
-      {loading ? (
+      {!selectedPersona ? (
+        <Card>
+          <CardContent className="text-text-secondary text-sm py-6">
+            Selecione uma persona acima para ver suas sessões.
+          </CardContent>
+        </Card>
+      ) : loading ? (
         <div className="flex items-center justify-center py-12 text-sm text-text-secondary">
           <Spinner />
           <span className="ml-2">Carregando…</span>
@@ -103,14 +177,14 @@ export default function AnaSessionsPage() {
       ) : sessions.length === 0 ? (
         <Card>
           <CardContent className="text-text-secondary text-sm py-6">
-            Nenhuma sessão da Ana ainda.
+            Nenhuma sessão para “{selectedPersona}” ainda.
           </CardContent>
         </Card>
       ) : (
         <Card>
           <CardHeader>
             <CardTitle className="font-mondwest text-display uppercase tracking-[0.12em]">
-              {sessions.length} sessão(ões)
+              {sessions.length} sessão(ões) · {selectedPersona}
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">

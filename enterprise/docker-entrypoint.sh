@@ -32,18 +32,21 @@ log "Installing dependencies..."
 pip install --quiet aiohttp 2>/dev/null && ok "aiohttp installed" || warn "aiohttp install failed (non-fatal)"
 
 # ==================== 2. SETUP PROFILE ====================
-# Admin gets full bundled skills; atendimento stays minimal (Ana has own persona)
+# Skills: bundled skills only when ENTERPRISE_SKILLS=1 (e.g. admin).
+# Otherwise the profile stays minimal (persona has its own skills).
 SKILLS_FLAG="--no-skills"
-if [[ "${PROFILE}" == "admin" ]]; then
+if [[ "${ENTERPRISE_SKILLS:-0}" == "1" ]]; then
     SKILLS_FLAG=""
 fi
+
+# PROFILE_BIND=1 → profile dir is pre-mounted (shared volume from Managing
+# Profile). profile create refuses a pre-existing mount dir, so build manually.
+PROFILE_BIND="${PROFILE_BIND:-0}"
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then
     log "Creating profile: ${PROFILE}"
     mkdir -p "${PROFILE_HOME}/skills" "${HERMES_HOME_BASE}/.local/bin"
-    if [[ "${PROFILE}" == "atendimento" ]]; then
-        # Atendimento profile lives on a shared volume (Managing Profile).
-        # profile create refuses the pre-existing mount dir, so build it manually.
+    if [[ "${PROFILE_BIND}" == "1" ]]; then
         touch "${PROFILE_HOME}/.no-bundled-skills"
     else
         python -m hermes_cli.main profile create "${PROFILE}" ${SKILLS_FLAG} 2>/dev/null || true
@@ -79,10 +82,18 @@ if [[ ! -f "${CONFIG_FILE}" ]]; then
         PROVIDER_CONFIG="custom"
     fi
 
-    # Atendimento gets minimal config — only clarify + web tools
-    if [[ "${PROFILE}" == "atendimento" ]]; then
+    # Minimal config when ENTERPRISE_MINIMAL=1 (default for personas):
+    # restrict toolsets via DISABLED_TOOLSETS env (comma-separated) and keep
+    # max_iterations low. Otherwise use the standard config.
+    if [[ "${ENTERPRISE_MINIMAL:-1}" == "1" ]]; then
+        DISABLED_BLOCK=""
+        IFS=',' read -ra TS <<< "${DISABLED_TOOLSETS:-}"
+        for ts in "${TS[@]}"; do
+            ts="$(echo -n "$ts" | xargs)"
+            [[ -n "$ts" ]] && DISABLED_BLOCK="${DISABLED_BLOCK}    - ${ts}\n"
+        done
         cat > "${CONFIG_FILE}" << YAMLEOF
-# Hermes Enterprise — atendimento config (minimal)
+# Hermes Enterprise — ${PROFILE} config (minimal)
 
 model:
   provider: ${PROVIDER_CONFIG}
@@ -90,58 +101,17 @@ model:
   base_url: ${MODEL_BASE_URL}
 
 agent:
-  name: ${AGENT_NAME:-Ana}
-  max_iterations: 5
+  name: ${AGENT_NAME:-Hermes}
+  max_iterations: ${ENTERPRISE_MAX_ITER:-5}
   tool_use_enforcement: auto
-  disabled_toolsets:
-    - hermes-cli
-    - hermes-telegram
-    - hermes-discord
-    - hermes-slack
-    - hermes-whatsapp
-    - hermes-email
-    - hermes-sms
-    - hermes-matrix
-    - hermes-mattermost
-    - hermes-dingtalk
-    - hermes-wecom
-    - hermes-feishu
-    - hermes-qqbot
-    - hermes-signal
-    - hermes-bluebubbles
-    - hermes-weixin
-    - hermes-yuanbao
-    - hermes-acp
-    - hermes-api-server
-    - hermes-webhook
-    - hermes-homeassistant
-    - hermes-cron
-    - browser
-    - code_execution
-    - coding
-    - computer_use
-    - debugging
-    - delegation
-    - file
-    - image_gen
-    - kanban
-    - moa
-    - spotify
-    - terminal
-    - todo
-    - tts
-    - video
-    - video_gen
-    - vision
-    - x_search
-    - homeassistant
-    - cronjob
-
+$([[ -n "${DISABLED_BLOCK}" ]] && printf "  disabled_toolsets:\n${DISABLED_BLOCK}")
 gateway:
   platforms: []
 
 api_server:
   enabled: true
+  host: ${API_SERVER_HOST:-0.0.0.0}
+  port: ${API_SERVER_PORT:-8000}
 YAMLEOF
     else
         cat > "${CONFIG_FILE}" << YAMLEOF
@@ -154,7 +124,7 @@ model:
 
 agent:
   name: ${AGENT_NAME:-Hermes}
-  max_iterations: 15
+  max_iterations: ${ENTERPRISE_MAX_ITER:-15}
   tool_use_enforcement: auto
 
 gateway:
@@ -162,6 +132,8 @@ gateway:
 
 api_server:
   enabled: true
+  host: ${API_SERVER_HOST:-0.0.0.0}
+  port: ${API_SERVER_PORT:-8000}
 YAMLEOF
     fi
     ok "Config written to ${CONFIG_FILE}"
@@ -170,70 +142,22 @@ else
 fi
 
 # ==================== 3b. SOUL.MD (persona) ====================
+# Persona comes from the Hermes default (no custom SOUL) unless an optional
+# template ships at enterprise/soul/<PROFILE>.md. Admin edits it later via
+# the EditService (edit_persona). Nothing hardcoded per-persona here.
 SOUL_FILE="${PROFILE_HOME}/SOUL.md"
-if [[ "${PROFILE}" == "atendimento" && ! -f "${SOUL_FILE}" ]]; then
-    if [[ -f "/home/hermes/enterprise/soul/ana.md" ]]; then
-        cp "/home/hermes/enterprise/soul/ana.md" "${SOUL_FILE}"
-        ok "Ana SOUL.md seeded from enterprise/soul/ana.md"
+if [[ ! -f "${SOUL_FILE}" ]]; then
+    if [[ -f "/home/hermes/enterprise/soul/${PROFILE}.md" ]]; then
+        cp "/home/hermes/enterprise/soul/${PROFILE}.md" "${SOUL_FILE}"
+        ok "SOUL.md seeded from enterprise/soul/${PROFILE}.md"
     else
-        log "Writing Ana persona to SOUL.md..."
-        cat > "${SOUL_FILE}" << 'SOULEOF'
-# Ana — Atendente Cesto d'Amore
-
-Você é **Ana**, atendente da Cesto d'Amore — a melhor loja de cestas personalizadas e presentes de Campina Grande-PB.
-
-## Identidade
-
-- **Nome:** Ana
-- **Empresa:** Cesto d'Amore (cestas, flores, presentes personalizados)
-- **Tom:** Informal, calorosa, como amiga prestativa. Use abreviações naturais: vc, pra, tá, tb.
-- **Idioma:** Português brasileiro.
-- **Emojis:** Máximo 2 por mensagem: 💕 🎁 ✅ 🥰 😊
-- **NUNCA** mencione que é IA, robô ou assistente virtual.
-- **NUNCA** comece respostas negativas com "Claro" — vá direto ao ponto.
-
-## Regras de Ouro (INVIOLÁVEIS)
-
-### 1. Redirecionamento para o Site
-
-**Toda intenção de compra → site.** Nunca feche venda diretamente.
-
-- "Toda compra é pelo site, tá? Lá vc vê todos os produtos, preços e faz o pedido com calma! 🎁 https://www.cestodamore.com.br"
-
-### 2. O que NÃO fazer
-
-- Inventar ou sugerir composições de cestas
-- Fazer curadoria ("te recomendo essa cesta...")
-- Criar pacotes personalizados
-- Passar preços sem o cliente ver no site
-- Coletar dados para fechar pedido (endereço, pagamento, data)
-- Atuar como vendedora ativa
-
-### 3. O que PODE fazer
-
-- Tirar dúvidas gerais (horário, entrega, produção, personalização)
-- Informar regras da loja
-- Orientar sobre formas de entrega e prazos
-- Encaminhar para páginas específicas do site
-
-## Autoaprendizado (recurso interno do Hermes)
-Use a memoria e a skill autoaprendizado-ana para evoluir a cada atendimento:
-registre duvidas recorrentes e respostas que funcionaram, e consolide padroes em FAQs.
-Nunca quebre as Regras de Ouro ao aprender.
-SOULEOF
-        ok "SOUL.md written"
+        # No template → Hermes default persona (empty SOUL, base system prompt).
+        log "No SOUL.md template for ${PROFILE} — using Hermes default persona."
     fi
 fi
 
-# ==================== 3b-2. ADMIN SOUL + ENTERPRISE CUSTOM SKILLS ====================
-# Admin gets a business-manager persona; both profiles get enterprise custom skills
-if [[ "${PROFILE}" == "admin" && ! -f "${SOUL_FILE}" ]]; then
-    if [[ -f "/home/hermes/enterprise/soul/admin.md" ]]; then
-        cp "/home/hermes/enterprise/soul/admin.md" "${SOUL_FILE}"
-        ok "Admin SOUL.md written from enterprise template"
-    fi
-fi
-
+# ==================== 3b-2. ENTERPRISE CUSTOM SKILLS ====================
+# Every profile gets its enterprise custom skills if a dir ships for it.
 if [[ -d "/home/hermes/enterprise/skills/${PROFILE}" ]]; then
     cp -rf "/home/hermes/enterprise/skills/${PROFILE}/"* "${PROFILE_HOME}/skills/" 2>/dev/null || true
     ok "Enterprise custom skills copied for ${PROFILE}"
@@ -263,6 +187,26 @@ if [[ "${DASHBOARD_ENABLED:-false}" == "true" ]]; then
     else
         warn "Dashboard web_dist not found — skipping dashboard start"
     fi
+fi
+
+# ==================== 3d. MIGRATION (sessões Postgres) ====================
+# Roda no boot de todo container (idempotente). Garante que as tabelas de
+# sessão existam e tenham a coluna 'persona' (multi-persona) antes do gateway.
+if [[ -n "${DATABASE_URL:-}" ]]; then
+    log "Applying session schema migration (DATABASE_URL)..."
+    PYTHONPATH="/app:${PYTHONPATH:-}" python - << 'PYEOF'
+import asyncio
+import sys
+sys.path.insert(0, "/app")
+try:
+    from enterprise.mcp.ana_sessions import init_schema
+    asyncio.run(init_schema())
+    print("[ENTERPRISE] session schema migrated OK")
+except Exception as exc:
+    print(f"[ENTERPRISE] session schema migration skipped: {exc}", file=sys.stderr)
+PYEOF
+else
+    warn "DATABASE_URL não definido — pulando migration de sessões."
 fi
 
 # ==================== 4. RUN ====================

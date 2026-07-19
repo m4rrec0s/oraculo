@@ -17,20 +17,32 @@ from hermes_constants import get_hermes_home
 # Configuração de agentes
 # ---------------------------------------------------------------------------
 
-# Mapeamento de agentes para seus HERMES_HOME
-AGENT_HOMES = {
-    "admin": Path(os.getenv("HERMES_ADMIN_HOME", "~/.hermes")).expanduser(),
-    "ana": Path(os.getenv("HERMES_ANA_HOME", "~/.hermes/profiles/ana")).expanduser(),
-}
+# Mapeamento de agentes para seus HERMES_HOME.
+# Cada agente pode ser sobrescrito via HERMES_<AGENT>_HOME.
+# Fallback: admin → ~/.hermes; demais → ~/.hermes/profiles/<agent>.
+def _build_agent_homes() -> dict[str, Path]:
+    homes: dict[str, Path] = {}
+    for agent in ("admin", "ana", os.getenv("ENTERPRISE_PROFILE", "atendimento")):
+        env_key = f"HERMES_{agent.upper()}_HOME"
+        if val := os.getenv(env_key):
+            homes[agent] = Path(val).expanduser()
+        elif agent == "admin":
+            homes[agent] = Path("~/.hermes").expanduser()
+        else:
+            homes[agent] = Path(f"~/.hermes/profiles/{agent}").expanduser()
+    return homes
+
+
+AGENT_HOMES = _build_agent_homes()
 
 # Header name
 AGENT_HEADER = "X-Hermes-Agent"
 
 # Agente padrão quando header está ausente (fail-safe restritivo)
-DEFAULT_AGENT = "ana"
+DEFAULT_AGENT = os.getenv("ENTERPRISE_PROFILE", "atendimento")
 
-# Agentes válidos
-VALID_AGENTS = {"admin", "ana"}
+# Agentes válidos (admin sempre allowlisted; demais via env)
+VALID_AGENTS = set(AGENT_HOMES.keys()) | {"admin"}
 
 
 # ---------------------------------------------------------------------------
