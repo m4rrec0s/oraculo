@@ -101,4 +101,12 @@ jobs:
             -w "\nHTTP Status: %{http_code}\n" \
             "http://185.205.246.213:3000/api/deploy/ce1d1e068927681fce50e871683c48aa77bc87a4d47312ee" || echo "⚠️ Atendimento webhook failed (non-fatal)"
           
+          sleep 2
+          
+          # Honda atendimento autodeploy
+          echo "Deploying hermes-honda-atendimento..."
+          curl -X POST \
+            -w "\nHTTP Status: %{http_code}\n" \
+            "http://185.205.246.213:3000/api/deploy/ea5536098f11b5dd758229a70564e3ae7435d8cbfe18a0fd" || echo "⚠️ Honda atendimento webhook failed (non-fatal)"
+          
           echo "✅ Autodeploy triggers sent"

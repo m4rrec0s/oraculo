@@ -4826,7 +4826,10 @@ class APIServerAdapter(BasePlatformAdapter):
             return
         persona = os.environ.get("ENTERPRISE_PROFILE", "atendimento")
         cell = re.sub(r"\D", "", str(session_key))[:20]
-        sid = str(session_key)
+        # Prefix the persona so the same external sessionKey (same cell) hitting
+        # two personas becomes two distinct rows — no UNIQUE(session_id) clash
+        # and no message cross-contamination between personas.
+        sid = f"{persona}_{session_key}"
         try:
             conn = pg8000.connect(dsn=dsn)
             cur = conn.cursor()
