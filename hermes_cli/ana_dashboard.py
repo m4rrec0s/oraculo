@@ -19,29 +19,70 @@ _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["persona"])
 
 
-def _persona_pg_conn():
-    """Connect to the Hermes Postgres via ``DATABASE_URL`` (internal swarm DSN).
+def _parse_pg_dsn(dsn: str) -> dict:
+    """Parse a ``postgresql://`` DSN into a dict of connection kwargs."""
+    import re
+    m = re.match(
+        r"^(?:postgres|postgresql)://(?:([^:@]+)(?::([^@]*))?@)?"
+        r"([^:/]+)(?::(\d+))?/([^?]+)",
+        dsn,
+    )
+    if not m:
+        return {"user": "hermes", "host": "localhost", "port": 5432, "database": "hermes_enterprise"}
+    user, password, host, port, database = m.groups()
+    kwargs = {
+        "user": user or "hermes",
+        "host": host or "localhost",
+        "port": int(port) if port else 5432,
+        "database": database or "hermes_enterprise",
+    }
+    if password is not None:
+        from urllib.parse import unquote
+        kwargs["password"] = unquote(password)
+    return kwargs
 
-    Returns a ``(conn, err)`` tuple: ``conn`` is the live connection or ``None``,
-    ``err`` is a short human-readable reason (no credentials) when ``conn`` is
-    ``None``. The specific reason is also logged.
+
+def _pg_connect() -> tuple:
+    """Connect to Hermes Postgres. Returns ``(conn, err)``.
+
+    Reads ``DATABASE_URL`` first, falls back to ``HERMES_PG_*`` vars.
+    Uses ``pg8000.connect()`` with positional parameters (compatible with
+    all pg8000 >= 1.29, avoids unsupported ``dsn=`` kwarg).
     """
     try:
         import pg8000
     except ImportError:
         _log.error("Persona PG connect failed: pg8000 not installed")
         return (None, "pg8000 driver not installed")
+
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
-        _log.error("Persona PG connect failed: DATABASE_URL not set in environment")
-        return (None, "DATABASE_URL not set")
+        host = os.environ.get("HERMES_PG_HOST")
+        if not host:
+            _log.error("Persona PG connect failed: no DATABASE_URL or HERMES_PG_HOST")
+            return (None, "No database URL configured (DATABASE_URL or HERMES_PG_* vars)")
+        kwargs = {
+            "host": host,
+            "port": int(os.environ.get("HERMES_PG_PORT", "5432")),
+            "database": os.environ.get("HERMES_PG_DATABASE", "hermes_enterprise"),
+            "user": os.environ.get("HERMES_PG_USER", "hermes"),
+        }
+        pw = os.environ.get("HERMES_PG_PASSWORD", "")
+        if pw:
+            kwargs["password"] = pw
+    else:
+        kwargs = _parse_pg_dsn(dsn)
+
     try:
-        # pg8000 accepts a postgres:// DSN via the `dsn` kwarg.
-        return (pg8000.connect(dsn=dsn), None)
+        return (pg8000.connect(**kwargs), None)
     except Exception as exc:
-        # Avoid leaking the DSN (may contain password) — log type + message only.
         _log.error("Persona PG connect failed: %s: %s", type(exc).__name__, str(exc)[:200])
         return (None, f"{type(exc).__name__}: {str(exc)[:120]}")
+
+
+def _persona_pg_conn():
+    """Backward-compat wrapper around _pg_connect. Used by all routes below."""
+    return _pg_connect()
 
 
 def _persona_sessions_query(persona: str = None, limit: int = 50, offset: int = 0):

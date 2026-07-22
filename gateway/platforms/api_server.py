@@ -4806,6 +4806,45 @@ class APIServerAdapter(BasePlatformAdapter):
                 return 0.0
         return 0.0
 
+    @staticmethod
+    def _pg_connect_kwargs() -> dict | None:
+        """Return connection kwargs from DATABASE_URL or HERMES_PG_* vars.
+
+        Returns ``None`` when neither source is configured.
+        """
+        import os
+        import re
+        dsn = os.environ.get("DATABASE_URL")
+        if dsn:
+            m = re.match(
+                r"^(?:postgres|postgresql)://(?:([^:@]+)(?::([^@]*))?@)?"
+                r"([^:/]+)(?::(\d+))?/([^?]+)",
+                dsn,
+            )
+            if m:
+                user, password, host, port, database = m.groups()
+                kwargs: dict = {
+                    "user": user or "hermes",
+                    "host": host or "localhost",
+                    "port": int(port) if port else 5432,
+                    "database": database or "hermes_enterprise",
+                }
+                if password is not None:
+                    from urllib.parse import unquote
+                    kwargs["password"] = unquote(password)
+                return kwargs
+            logger.warning("ana persist: DATABASE_URL parse failed, trying HERMES_PG_*")
+        host = os.environ.get("HERMES_PG_HOST")
+        if not host:
+            return None
+        return {
+            "host": host,
+            "port": int(os.environ.get("HERMES_PG_PORT", "5432")),
+            "database": os.environ.get("HERMES_PG_DATABASE", "hermes_enterprise"),
+            "user": os.environ.get("HERMES_PG_USER", "hermes"),
+            "password": os.environ.get("HERMES_PG_PASSWORD"),
+        }
+
     def _persist_ana_turn(self, session_key: str, user_msg: str, assistant_msg: str) -> None:
         """Upsert the Ana session + append user/assistant messages to the
         dedicated Hermes Postgres (``DATABASE_URL`` — internal swarm DSN).
@@ -4820,9 +4859,9 @@ class APIServerAdapter(BasePlatformAdapter):
         except ImportError:
             logger.debug("ana persist skipped: pg8000 not installed")
             return
-        dsn = os.environ.get("DATABASE_URL")
-        if not dsn:
-            logger.debug("ana persist skipped: DATABASE_URL not set")
+        kwargs = self._pg_connect_kwargs()
+        if kwargs is None:
+            logger.debug("ana persist skipped: no DATABASE_URL or HERMES_PG_* vars")
             return
         persona = os.environ.get("ENTERPRISE_PROFILE", "atendimento")
         cell = re.sub(r"\D", "", str(session_key))[:20]
@@ -4831,7 +4870,7 @@ class APIServerAdapter(BasePlatformAdapter):
         # and no message cross-contamination between personas.
         sid = f"{persona}_{session_key}"
         try:
-            conn = pg8000.connect(dsn=dsn)
+            conn = pg8000.connect(**kwargs)
             cur = conn.cursor()
             cur.execute(
                 """INSERT INTO ana_sessions (persona, cell, session_id, status, last_message_at, message_count, updated_at)

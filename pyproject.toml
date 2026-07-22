@@ -138,6 +138,11 @@ dependencies = [
   # Hence the ``sys_platform == 'win32'`` marker: the dep (and its portalocker
   # / pywin32 tree) ships only where it's actually used.
   "concurrent-log-handler==0.9.29; sys_platform == 'win32'",
+  # Enterprise dashboard reads the dedicated Hermes Postgres (ana_sessions /
+  # ana_messages) via pg8000. Shipped in core so the admin dashboard never
+  # 503s on a missing driver (the runtime pip-install in docker-entrypoint
+  # can silently no-op behind `|| true`).
+  "pg8000>=1.31,<2",
 ]
 
 [project.optional-dependencies]
