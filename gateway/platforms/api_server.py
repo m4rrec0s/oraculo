@@ -4874,19 +4874,19 @@ class APIServerAdapter(BasePlatformAdapter):
             cur = conn.cursor()
             cur.execute(
                 """INSERT INTO ana_sessions (persona, cell, session_id, status, last_message_at, message_count, updated_at)
-                   VALUES (%(persona)s, %(cell)s, %(sid)s, 'active', NOW(), 1, NOW())
+                   VALUES (%s, %s, %s, 'active', NOW(), 1, NOW())
                    ON CONFLICT (session_id) DO UPDATE SET
-                     persona = %(persona)s,
+                     persona = %s,
                      last_message_at = NOW(), updated_at = NOW(),
                      message_count = ana_sessions.message_count + 1,
                      status = CASE WHEN ana_sessions.status = 'archived' THEN 'active' ELSE ana_sessions.status END""",
-                {"persona": persona, "cell": cell, "sid": sid},
+                (persona, cell, sid, persona),
             )
             cur.execute(
                 """INSERT INTO ana_messages (persona, session_id, role, content, created_at)
-                   VALUES (%(persona)s, %(sid)s, 'user', %(um)s, NOW()),
-                          (%(persona)s, %(sid)s, 'assistant', %(am)s, NOW())""",
-                {"persona": persona, "sid": sid, "um": user_msg, "am": assistant_msg},
+                   VALUES (%s, %s, 'user', %s, NOW()),
+                          (%s, %s, 'assistant', %s, NOW())""",
+                (persona, sid, user_msg, persona, sid, assistant_msg),
             )
             conn.commit()
             cur.close()
@@ -4991,15 +4991,18 @@ class APIServerAdapter(BasePlatformAdapter):
         )
         final_response = result.get("final_response", "") if isinstance(result, dict) else ""
 
-        # Persist turn to dedicated Hermes Postgres (ana_sessions / ana_messages)
-        try:
-            import asyncio as _asyncio
-            loop = _asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None, self._persist_ana_turn, safe_key, message, final_response,
-            )
-        except Exception:
-            logger.debug("Ana turn persist failed", exc_info=True)
+        # Persist turn to dedicated Hermes Postgres (ana_sessions / ana_messages).
+        # Disabled when use_postgres is explicitly false in the platform
+        # config extra — default is true for backwards compatibility.
+        if self.config.extra.get("use_postgres", True):
+            try:
+                import asyncio as _asyncio
+                loop = _asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None, self._persist_ana_turn, safe_key, message, final_response,
+                )
+            except Exception:
+                logger.debug("Ana turn persist failed", exc_info=True)
 
         return web.json_response({
             "object": "hermes.ana.message",

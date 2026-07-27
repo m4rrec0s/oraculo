@@ -96,7 +96,12 @@ def _persona_sessions_query(persona: str = None, limit: int = 50, offset: int = 
         return None
     try:
         cur = conn.cursor()
-        where = "WHERE s.persona = %(persona)s" if persona else ""
+        if persona:
+            where = "WHERE s.persona = %s"
+            params = (persona, limit, offset)
+        else:
+            where = ""
+            params = (limit, offset)
         cur.execute(
             f"""SELECT s.persona, s.cell, s.session_id, s.status, s.message_count,
                       COALESCE(s.metadata->>'name', c.name, s.cell) AS session_label,
@@ -108,8 +113,8 @@ def _persona_sessions_query(persona: str = None, limit: int = 50, offset: int = 
                LEFT JOIN ana_customers c ON s.cell = c.cell
                {where}
                ORDER BY s.last_message_at DESC NULLS LAST
-               LIMIT %(limit)s OFFSET %(offset)s""",
-            {"persona": persona, "limit": limit, "offset": offset},
+               LIMIT %s OFFSET %s""",
+            params,
         )
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
