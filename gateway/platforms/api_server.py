@@ -4894,6 +4894,121 @@ class APIServerAdapter(BasePlatformAdapter):
         except Exception as exc:  # noqa: BLE001
             logger.debug("ana persist error: %s", exc)
 
+    def _ana_pg_session_id(self, session_key: str) -> str:
+        """Canonical Postgres session_id for an Ana persona turn.
+
+        Matches the ``{persona}_{session_key}`` convention used by
+        ``_persist_ana_turn`` so the same id is used for reads and writes.
+        """
+        import os
+        persona = os.environ.get("ENTERPRISE_PROFILE", "atendimento")
+        return f"{persona}_{session_key}"
+
+    def _load_ana_session_from_pg(self, session_id: str) -> dict | None:
+        """Fetch session metadata from dedicated Hermes Postgres.
+
+        Returns a dict with ``updated_at`` / ``created_at`` as float epochs,
+        or ``None`` when unavailable / not found.
+        """
+        try:
+            import pg8000
+        except ImportError:
+            return None
+        kwargs = self._pg_connect_kwargs()
+        if kwargs is None:
+            return None
+        try:
+            conn = pg8000.connect(**kwargs)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT updated_at, created_at FROM ana_sessions WHERE session_id = %s",
+                (session_id,),
+            )
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row is None:
+                return None
+            import datetime as _dt
+            result: dict = {}
+            for idx, key in enumerate(("updated_at", "created_at")):
+                val = row[idx]
+                if val is None:
+                    result[key] = 0.0
+                elif isinstance(val, _dt.datetime):
+                    result[key] = val.timestamp()
+                else:
+                    result[key] = float(val)
+            return result
+        except Exception as exc:
+            logger.debug("ana PG session lookup failed: %s", exc)
+            return None
+
+    def _load_ana_history_from_pg(self, session_id: str) -> list:
+        """Load conversation history for an Ana session from dedicated Postgres.
+
+        Returns a list of ``{"role": ..., "content": ..., "timestamp": ...}``
+        dicts compatible with ``_run_agent(conversation_history=...)``.
+        """
+        try:
+            import pg8000
+        except ImportError:
+            return []
+        kwargs = self._pg_connect_kwargs()
+        if kwargs is None:
+            return []
+        try:
+            conn = pg8000.connect(**kwargs)
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT role, content, created_at
+                   FROM ana_messages
+                   WHERE session_id = %s
+                   ORDER BY created_at ASC""",
+                (session_id,),
+            )
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+            import datetime as _dt
+            history: list = []
+            for role, content, ts in rows:
+                if isinstance(ts, _dt.datetime):
+                    epoch = ts.timestamp()
+                elif ts is None:
+                    epoch = 0.0
+                else:
+                    epoch = float(ts)
+                history.append({"role": role, "content": content, "timestamp": epoch})
+            return history
+        except Exception as exc:
+            logger.debug("ana PG history load failed: %s", exc)
+            return []
+
+    def _ana_session_exists_in_pg(self, session_id: str) -> bool:
+        """Return True if the session row exists in dedicated Postgres."""
+        try:
+            import pg8000
+        except ImportError:
+            return False
+        kwargs = self._pg_connect_kwargs()
+        if kwargs is None:
+            return False
+        try:
+            conn = pg8000.connect(**kwargs)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM ana_sessions WHERE session_id = %s LIMIT 1",
+                (session_id,),
+            )
+            found = cur.fetchone() is not None
+            cur.close()
+            conn.close()
+            return found
+        except Exception as exc:
+            logger.debug("ana PG existence check failed: %s", exc)
+            return False
+
     async def _handle_ana_message(self, request: "web.Request") -> "web.Response":
         """POST /api/ana/message — inbound turn for the Ana atendente.
 
@@ -4924,9 +5039,11 @@ class APIServerAdapter(BasePlatformAdapter):
                 status=400,
             )
 
-        # Map the authoritative external sessionKey onto a stable api_server
-        # SessionDB id. The same id across calls gives Ana continuous
-        # transcript + memory scope (gateway_session_key below).
+        # Map the authoritative external sessionKey onto a stable Postgres
+        # session id.  For non-admin (persona) profiles the Postgres store
+        # (ana_sessions / ana_messages) is the single source of truth — the
+        # local SessionDB is never read for Ana turns, so dashboard deletes
+        # take effect immediately.
         safe_key = re.sub(r"[\r\n\x00]", "", str(session_key)).strip()
         if len(safe_key) > self._MAX_SESSION_HEADER_LEN:
             safe_key = safe_key[: self._MAX_SESSION_HEADER_LEN]
@@ -4935,17 +5052,10 @@ class APIServerAdapter(BasePlatformAdapter):
                 _openai_error("Invalid sessionKey", code="invalid_session_key"),
                 status=400,
             )
-        sid = f"ana_{safe_key}"
-
-        db = self._ensure_session_db()
-        if db is None:
-            return web.json_response(
-                _openai_error("Session database unavailable", code="session_db_unavailable"),
-                status=503,
-            )
+        sid = self._ana_pg_session_id(safe_key)
 
         # 72h idle TTL — Ana sessions reset if untouched beyond the window
-        # (ratified P2). Mirrors the gateway idle reset policy for this endpoint.
+        # (ratified P2).  Checked against Postgres, not local SessionDB.
         idle_minutes = 4320
         runner = getattr(self, "gateway_runner", None)
         cfg = getattr(runner, "config", None)
@@ -4957,23 +5067,27 @@ class APIServerAdapter(BasePlatformAdapter):
             except Exception:
                 pass
 
-        session = db.get_session(sid)
-        if session and self._ana_idle_seconds(session.get("updated_at") or session.get("created_at")) > idle_minutes * 60:
+        pg_session = self._load_ana_session_from_pg(sid)
+        if pg_session and self._ana_idle_seconds(
+            pg_session.get("updated_at") or pg_session.get("created_at")
+        ) > idle_minutes * 60:
             try:
-                db.delete_session(sid)
+                import pg8000 as _pg
+                _kw = self._pg_connect_kwargs()
+                if _kw:
+                    _conn = _pg.connect(**_kw)
+                    _cur = _conn.cursor()
+                    _cur.execute("DELETE FROM ana_messages WHERE session_id = %s", (sid,))
+                    _cur.execute("DELETE FROM ana_sessions WHERE session_id = %s", (sid,))
+                    _conn.commit()
+                    _cur.close()
+                    _conn.close()
             except Exception:
-                logger.debug("Ana session reset failed for %s", sid, exc_info=True)
-            session = None
+                logger.debug("Ana PG session reset failed for %s", sid, exc_info=True)
+            pg_session = None
 
-        if session is None:
-            db.create_session(sid, "api_server")
-            if push_name:
-                try:
-                    db.set_session_title(sid, f"Ana · {push_name}")
-                except Exception:
-                    pass
-
-        history = self._conversation_history_for_session(sid)
+        # Load history from Postgres (source of truth) — never from local SessionDB.
+        history = self._load_ana_history_from_pg(sid)
 
         ephemeral_system_prompt = None
         if push_name:
