@@ -4845,7 +4845,7 @@ class APIServerAdapter(BasePlatformAdapter):
             "password": os.environ.get("HERMES_PG_PASSWORD"),
         }
 
-    def _persist_ana_turn(self, session_key: str, user_msg: str, assistant_msg: str) -> None:
+    def _persist_ana_turn(self, session_key: str, user_msg: str, assistant_msg: str, push_name: str | None = None) -> None:
         """Upsert the Ana session + append user/assistant messages to the
         dedicated Hermes Postgres (``DATABASE_URL`` — internal swarm DSN).
         Best-effort: any failure is swallowed so a DB hiccup never breaks the
@@ -4872,15 +4872,16 @@ class APIServerAdapter(BasePlatformAdapter):
         try:
             conn = pg8000.connect(**kwargs)
             cur = conn.cursor()
+            import json as _json
             cur.execute(
-                """INSERT INTO ana_sessions (persona, cell, session_id, status, last_message_at, message_count, updated_at)
-                   VALUES (%s, %s, %s, 'active', NOW(), 1, NOW())
+                """INSERT INTO ana_sessions (persona, cell, session_id, status, last_message_at, message_count, updated_at, metadata)
+                   VALUES (%s, %s, %s, 'active', NOW(), 1, NOW(), %s)
                    ON CONFLICT (session_id) DO UPDATE SET
                      persona = %s,
                      last_message_at = NOW(), updated_at = NOW(),
                      message_count = ana_sessions.message_count + 1,
                      status = CASE WHEN ana_sessions.status = 'archived' THEN 'active' ELSE ana_sessions.status END""",
-                (persona, cell, sid, persona),
+                (persona, cell, sid, _json.dumps({"name": push_name}) if push_name else None, persona),
             )
             cur.execute(
                 """INSERT INTO ana_messages (persona, session_id, role, content, created_at)
@@ -5113,7 +5114,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 import asyncio as _asyncio
                 loop = _asyncio.get_event_loop()
                 await loop.run_in_executor(
-                    None, self._persist_ana_turn, safe_key, message, final_response,
+                    None, self._persist_ana_turn, safe_key, message, final_response, push_name,
                 )
             except Exception:
                 logger.debug("Ana turn persist failed", exc_info=True)
