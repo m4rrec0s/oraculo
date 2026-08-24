@@ -36,13 +36,63 @@ BRANCH = "main"
 UPSTREAM_REF = f"{REMOTE}/{BRANCH}"
 
 # Files we OWN. Never overwritten by sync. Upstream edits here => warning only.
+#
+# NOTE(2026-08-24): expanded after audit of `git log --name-only aa0a0790bc..main`.
+# The old list missed 31 customized files (Ana PG sessions, web_server mounts,
+# deploy infra). Without them a sync silently overwrote our work.
+#
+# Files marked MIXED contain both our hooks and upstream code — protecting them
+# means they go stale. Port our hunks onto the new upstream version manually
+# each cycle (see MIXED backlog below), then unprotect.
 PROTECTED = (
+    # Ana persona / sessões / dashboard
     "enterprise/",
     "skills/cesto-damore/",
-    "enterprise/mcp/ana_sessions.py",
     "hermes_cli/ana_dashboard.py",
+    "gateway/platforms/api_server.py",       # MIXED: sessões Postgres do Ana
+    "hermes_cli/web_server.py",              # MIXED: auth + rotas enterprise
+    "hermes_cli/pty_session.py",             # MIXED
+    "hermes_cli/profiles.py",                # MIXED
+    "hermes_cli/main.py",                    # MIXED
+    "tests/gateway/test_ana_pg_session_source.py",
+    "tests/hermes_cli/test_ws_ticket_crash_repro.py",
     "web/src/App.tsx",
+    "web/src/lib/api.ts",
     "web/src/pages/AnaSessionsPage.tsx",
+    "web/src/pages/AtendimentoPage.tsx",     # MIXED
+    "web/src/pages/ChatPage.tsx",            # MIXED
+    # Infra enterprise / deploy EasyPanel
+    "Dockerfile.enterprise",
+    "docker/enterprise-entrypoint.sh",
+    "docker-compose.yml",
+    "docker-compose.dev.yml",
+    "docker-compose.easypanel.yml",
+    "docker-compose.enterprise.yml",
+    ".github/workflows/hermes-enterprise-publish.yml",
+    ".env.example",
+    ".gitignore",
+    "EASYPANEL_AUTODEPLOY.md",
+    "README.EASYPANEL.md",
+    "package.json",
+    "package-lock.json",
+    "pyproject.toml",                        # MIXED: dep python-telegram-bot
+    "uv.lock",
+    "scripts/easypanel-provision.ts",
+    "scripts/provision-easypanel.sh",
+    "scripts/seed-sync.py",
+    "scripts/seed-sync.sh",
+    "scripts/sync_upstream.sh",
+    "scripts/hermes_sync.py",
+    # Restaurados da base: upstream deletou, mas nosso main.py protegido
+    # ainda importa. Manter até portar o main.py para o novo layout CLI.
+    "hermes_cli/subcommands/postinstall.py",
+    "hermes_cli/subcommands/version.py",
+)
+
+# Directories deliberately removed when splitting the fork. Sync never
+# re-adds anything under them, even brand-new upstream files.
+PRUNED_PREFIXES = (
+    "apps/",
 )
 
 # Anchor: the release tag this repo was cut from.
@@ -151,7 +201,25 @@ def sync() -> int:
     pulled = 0
     removed = 0
     skipped = 0
+    resurrected_guard = 0
     for f in free:
+        # Guard: files we deliberately deleted when splitting the fork
+        # (e.g. apps/desktop, extra workflows). In base but gone here =>
+        # keep them deleted; never resurrect.
+        in_base = _run(
+            ["git", "cat-file", "-e", f"{base}:{f}"], check=False
+        ).returncode == 0
+        in_head = _run(
+            ["git", "cat-file", "-e", f"HEAD:{f}"], check=False
+        ).returncode == 0
+        if in_base and not in_head:
+            resurrected_guard += 1
+            continue
+        if not in_head and any(
+            f.startswith(p) for p in PRUNED_PREFIXES
+        ):
+            resurrected_guard += 1
+            continue
         # Exists in upstream tip? -> checkout. Deleted upstream? -> rm here.
         has = _run(["git", "cat-file", "-e", f"{UPSTREAM_REF}:{f}"], check=False)
         if has.returncode == 0:
@@ -174,7 +242,8 @@ def sync() -> int:
               f"(upstream changed them, yours kept).", file=sys.stderr)
 
     _write_state(_run(["git", "rev-parse", UPSTREAM_REF]).stdout.strip())
-    print(f"✓ Synced: {pulled} pulled, {removed} removed, {skipped} skipped.")
+    print(f"✓ Synced: {pulled} pulled, {removed} removed, "
+          f"{skipped} skipped, {resurrected_guard} kept-deleted.")
     print("   Review diff, then commit/push when ready.")
     return 0 if skipped == 0 else 1
 
