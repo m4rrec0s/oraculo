@@ -38,7 +38,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24.11.0"
 
       - name: Web dashboard typecheck
         run: cd web && npm install && npm run typecheck
@@ -63,7 +63,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24.11.0"
 
       - name: Build ui-tui
         run: cd ui-tui && npm install && npm run build
