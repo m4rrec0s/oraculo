@@ -13,10 +13,15 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+class _FakeProc:
+    pid = 99999
+
+
 class _OneFrameBridge:
     def __init__(self):
         self._sent = False
         self.closed = False
+        self._proc = _FakeProc()
 
     @classmethod
     def spawn(cls, *args, **kwargs):

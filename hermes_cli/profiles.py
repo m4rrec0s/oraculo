@@ -1867,6 +1867,22 @@ def get_active_profile_name() -> str:
     return "custom"
 
 
+def profile_matches_home(profile: str) -> bool:
+    """True when *profile* names the profile this HERMES_HOME belongs to.
+
+    The default profile is identified by the literal ``"default"`` and
+    corresponds to ``~/.hermes`` (no ``/profiles/<name>`` suffix).  A
+    non-default profile name matches when it is the final path component
+    of ``HERMES_HOME`` under ``~/.hermes/profiles/``.
+
+    This is the inverse of "does the URL prefix name someone else's
+    profile?" — used by the API server to reject ``/p/<other>/``
+    requests on single-profile gateways (#91583).
+    """
+    current = get_active_profile_name()
+    return profile == current
+
+
 # ---------------------------------------------------------------------------
 # Export / Import
 # ---------------------------------------------------------------------------

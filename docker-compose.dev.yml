@@ -70,6 +70,8 @@ services:
       DASHBOARD_ENABLED: "true"
       DASHBOARD_PORT: "9119"
       DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_USERNAME: ${ADMIN_DASHBOARD_USERNAME:-admin}
+      DASHBOARD_PASSWORD: ${ADMIN_DASHBOARD_PASSWORD}
       # --- Database (local postgres) ---
       HERMES_PG_HOST: postgres
       HERMES_PG_PORT: 5432
