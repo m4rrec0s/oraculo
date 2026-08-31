@@ -33,6 +33,8 @@ node_modules
 # that now depends on the full ui-tui/packages/hermes-ink/ tree being present.
 ui-tui/dist/
 ui-tui/packages/hermes-ink/dist/
+!ui-tui/dist/
+!ui-tui/dist/**
 
 # CI/CD
 .github
