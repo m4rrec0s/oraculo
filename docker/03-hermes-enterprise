@@ -1,0 +1,311 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# s6-overlay cont-init.d — Enterprise profile setup
+# Runs AFTER 01-hermes-setup (upstream stage2) and BEFORE 02-reconcile-profiles.
+# Handles: DATABASE_URL parsing, profile creation, config generation,
+#          SOUL.md seeding, enterprise skills sync, ana schema, dashboard auth.
+#
+# Idempotent — safe to run on every container start.
+
+set -eu
+
+HERMES_INSTALL="/opt/hermes"
+HERMES_DATA="${HERMES_HOME:-/opt/data}"
+
+# ==================== PROFILE SELECTION ====================
+PROFILE="${ENTERPRISE_PROFILE:-atendimento}"
+PROFILE_HOME="${HERMES_DATA}/profiles/${PROFILE}"
+CONFIG_FILE="${PROFILE_HOME}/config.yaml"
+
+echo "[enterprise] Profile: ${PROFILE}"
+
+# ==================== URL PARSING ====================
+# Parse DATABASE_URL → HERMES_PG_* vars
+if [ -n "${DATABASE_URL:-}" ]; then
+    # postgresql://user:password@host:port/database
+    _user=$(printf '%s' "$DATABASE_URL" | sed -n 's|^[^:]*://\([^:]*\):.*|\1|p')
+    _pass=$(printf '%s' "$DATABASE_URL" | sed -n 's|^[^:]*://[^:]*:\([^@]*\)@.*|\1|p')
+    _host=$(printf '%s' "$DATABASE_URL" | sed -n 's|.*@\([^:]*\):.*|\1|p')
+    _port=$(printf '%s' "$DATABASE_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
+    _db=$(printf '%s' "$DATABASE_URL" | sed -n 's|.*/\([^?]*\).*|\1|p')
+    [ -n "$_user" ] && export HERMES_PG_USER="$_user"
+    [ -n "$_pass" ] && export HERMES_PG_PASSWORD="$_pass"
+    [ -n "$_host" ] && export HERMES_PG_HOST="$_host"
+    [ -n "$_port" ] && export HERMES_PG_PORT="$_port"
+    [ -n "$_db" ] && export HERMES_PG_DATABASE="$_db"
+    echo "[enterprise] DATABASE_URL parsed: host=${HERMES_PG_HOST:-?}:${HERMES_PG_PORT:-?} db=${HERMES_PG_DATABASE:-?}"
+    unset _user _pass _host _port _db
+fi
+
+# Parse REDIS_URL → HERMES_REDIS_* vars
+if [ -n "${REDIS_URL:-}" ]; then
+    _rhost=$(printf '%s' "$REDIS_URL" | sed -n 's|redis://[^@]*@\([^:]*\):.*|\1p')
+    _rport=$(printf '%s' "$REDIS_URL" | sed -n 's|.*:\([0-9]*\)$|\1|p')
+    _rpass=$(printf '%s' "$REDIS_URL" | sed -n 's|redis://[^:]*:\([^@]*\)@.*|\1|p')
+    [ -n "$_rhost" ] && export HERMES_REDIS_HOST="$_rhost"
+    [ -n "$_rport" ] && export HERMES_REDIS_PORT="$_rport"
+    [ -n "$_rpass" ] && export HERMES_REDIS_PASSWORD="$_rpass"
+    echo "[enterprise] REDIS_URL parsed: host=${HERMES_REDIS_HOST:-?}:${HERMES_REDIS_PORT:-?}"
+    unset _rhost _rport _rpass
+fi
+
+# ==================== MODEL CONFIG ====================
+MODEL_PROVIDER="${MODEL_PROVIDER:-nvidia}"
+MODEL_NAME="${MODEL_NAME:-nvidia/nemotron-3-super-120b-a12b}"
+MODEL_BASE_URL="${MODEL_BASE_URL:-https://integrate.api.nvidia.com/v1}"
+
+# Resolve API key
+if [ -n "${API_KEY_VAR:-}" ]; then
+    eval "API_KEY_VAL=\"\${${API_KEY_VAR}:-}\""
+else
+    case "${MODEL_PROVIDER}" in
+        openai)     API_KEY_VAL="${OPENAI_API_KEY:-}" ;;
+        nvidia)     API_KEY_VAL="${NVIDIA_API_KEY:-}" ;;
+        anthropic)  API_KEY_VAL="${ANTHROPIC_API_KEY:-}" ;;
+        openrouter) API_KEY_VAL="${OPENROUTER_API_KEY:-}" ;;
+        *)          API_KEY_VAL="${OPENAI_API_KEY:-${NVIDIA_API_KEY:-}}" ;;
+    esac
+fi
+
+# ==================== PROFILE SETUP ====================
+if [ ! -d "${PROFILE_HOME}" ]; then
+    echo "[enterprise] Creating profile directory: ${PROFILE_HOME}"
+    mkdir -p "${PROFILE_HOME}/skills"
+    if [ "${PROFILE}" = "atendimento" ]; then
+        touch "${PROFILE_HOME}/.no-bundled-skills"
+    else
+        s6-setuidgid hermes "${HERMES_INSTALL}/.venv/bin/python" -m hermes_cli.main \
+            profile create "${PROFILE}" 2>/dev/null || true
+    fi
+fi
+
+# Ensure profile subdirs
+s6-setuidgid hermes mkdir -p \
+    "${PROFILE_HOME}/skills" \
+    "${PROFILE_HOME}/sessions" \
+    "${PROFILE_HOME}/logs" \
+    "${PROFILE_HOME}/memories" \
+    "${PROFILE_HOME}/cron" \
+    "${PROFILE_HOME}/skins" \
+    "${PROFILE_HOME}/plans" 2>/dev/null || true
+
+# ==================== CONFIG GENERATION ====================
+# Regenerate if model changed; patch API key rotation in-place
+if [ -f "${CONFIG_FILE}" ]; then
+    _cfg_default=$(grep -E '^\s+default:' "${CONFIG_FILE}" 2>/dev/null | head -1 | sed 's/.*default:[[:space:]]*//' | tr -d '"' || true)
+    _seeded=$(cat "${PROFILE_HOME}/.model_seeded" 2>/dev/null || true)
+    if [ -z "${_seeded}" ]; then
+        printf '%s' "${MODEL_NAME}" > "${PROFILE_HOME}/.model_seeded"
+        _seeded="${MODEL_NAME}"
+    fi
+    if [ "${_seeded}" != "${_cfg_default}" ]; then
+        echo "[enterprise] Model '${_cfg_default}' is user-set — preserving"
+    elif [ "${_cfg_default}" != "${MODEL_NAME}" ] && [ -n "${_cfg_default}" ]; then
+        echo "[enterprise] Model changed (${_cfg_default} → ${MODEL_NAME}) — regenerating config"
+        rm -f "${CONFIG_FILE}"
+    fi
+    # API key rotation
+    if [ -f "${CONFIG_FILE}" ] && [ -n "${API_KEY_VAL:-}" ]; then
+        _cfg_apikey=$(grep -E '^\s+api_key:' "${CONFIG_FILE}" 2>/dev/null | head -1 | sed 's/.*api_key:[[:space:]]*//' | tr -d '"' || true)
+        if [ "${_cfg_apikey}" != "${API_KEY_VAL}" ]; then
+            echo "[enterprise] API key changed — patching model.api_key"
+            s6-setuidgid hermes "${HERMES_INSTALL}/.venv/bin/python" -c "
+import os, re
+p = '${CONFIG_FILE}'
+s = open(p).read()
+s = re.sub(r'(?m)^(\s*api_key:\s*).*\$', r'\1\"${API_KEY_VAL}\"', s, count=1)
+open(p, 'w').write(s)
+" 2>/dev/null || true
+        fi
+    fi
+fi
+
+# Generate config if missing
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "[enterprise] Generating config for ${PROFILE}..."
+    mkdir -p "$(dirname "${CONFIG_FILE}")"
+
+    PROVIDER_CFG="${MODEL_PROVIDER}"
+    [ "${MODEL_PROVIDER}" = "openai" ] && PROVIDER_CFG="custom"
+
+    if [ "${PROFILE}" = "atendimento" ]; then
+        s6-setuidgid hermes "${HERMES_INSTALL}/.venv/bin/python" -c "
+import yaml, os
+config = {
+    'model': {
+        'provider': '${PROVIDER_CFG}',
+        'default': '${MODEL_NAME}',
+        'base_url': '${MODEL_BASE_URL}',
+        'api_key': '${API_KEY_VAL:-}',
+    },
+    'terminal': {'cwd': '/home/hermes'},
+    'agent': {
+        'name': '${AGENT_NAME:-Ana}',
+        'max_iterations': 5,
+        'tool_use_enforcement': 'auto',
+        'disabled_toolsets': [
+            'hermes-cli', 'hermes-telegram', 'hermes-discord', 'hermes-slack',
+            'hermes-whatsapp', 'hermes-email', 'hermes-sms', 'hermes-matrix',
+            'hermes-mattermost', 'hermes-dingtalk', 'hermes-wecom', 'hermes-feishu',
+            'hermes-qqbot', 'hermes-signal', 'hermes-bluebubbles', 'hermes-weixin',
+            'hermes-yuanbao', 'hermes-acp', 'hermes-api-server', 'hermes-webhook',
+            'hermes-homeassistant', 'hermes-cron',
+            'browser', 'code_execution', 'coding', 'computer_use', 'debugging',
+            'delegation', 'file', 'image_gen', 'kanban', 'moa', 'spotify',
+            'terminal', 'todo', 'tts', 'video', 'video_gen', 'vision', 'x_search',
+            'homeassistant', 'cronjob',
+        ],
+    },
+    'gateway': {'platforms': []},
+    'api_server': {'enabled': True},
+}
+with open('${CONFIG_FILE}', 'w') as f:
+    yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+print('[enterprise] atendimento config written')
+" 2>/dev/null || true
+    else
+        # Admin config — dashboard auth from env
+        ADMIN_DASH_USER="${DASHBOARD_USERNAME:-${ADMIN_DASHBOARD_USERNAME:-admin}}"
+        _DASH_PASS="${DASHBOARD_PASSWORD:-${ADMIN_DASHBOARD_PASSWORD:-}}"
+        s6-setuidgid hermes "${HERMES_INSTALL}/.venv/bin/python" -c "
+import yaml, os, hashlib, sys
+config = {
+    'model': {
+        'provider': '${PROVIDER_CFG}',
+        'default': '${MODEL_NAME}',
+        'base_url': '${MODEL_BASE_URL}',
+        'api_key': '${API_KEY_VAL:-}',
+    },
+    'terminal': {'cwd': '/home/hermes'},
+    'agent': {
+        'name': '${AGENT_NAME:-Hermes}',
+        'max_iterations': 15,
+        'tool_use_enforcement': 'auto',
+    },
+    'gateway': {'platforms': []},
+    'api_server': {'enabled': True},
+}
+# Dashboard auth
+dash_user = '${ADMIN_DASH_USER}'
+dash_pass = '${_DASH_PASS}'
+if dash_pass:
+    config['dashboard'] = {
+        'basic_auth': {
+            'username': dash_user,
+            'password': dash_pass,
+        }
+    }
+with open('${CONFIG_FILE}', 'w') as f:
+    yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+print('[enterprise] admin config written')
+" 2>/dev/null || true
+    fi
+    echo "[enterprise] Config: ${CONFIG_FILE}"
+fi
+
+# ==================== DASHBOARD AUTH (idempotent) ====================
+# Ensure basic_auth is in admin config — survives config regeneration
+if [ "${PROFILE}" = "admin" ] && [ -f "${CONFIG_FILE}" ]; then
+    ADMIN_DASH_USER="${DASHBOARD_USERNAME:-${ADMIN_DASHBOARD_USERNAME:-admin}}"
+    _DASH_PASS="${DASHBOARD_PASSWORD:-${ADMIN_DASHBOARD_PASSWORD:-}}"
+    if [ -n "${_DASH_PASS}" ]; then
+        s6-setuidgid hermes "${HERMES_INSTALL}/.venv/bin/python" -c "
+import sys, re
+config_path = '${CONFIG_FILE}'
+username = '${ADMIN_DASH_USER}'
+password = '${_DASH_PASS}'
+with open(config_path, 'r') as f:
+    content = f.read()
+# Remove existing dashboard block
+content = re.sub(r'\ndashboard:\s*\n\s+basic_auth:.*?\n\n', '\n', content, flags=re.DOTALL)
+content = re.sub(r'\ndashboard:\s*\n(?!\s+basic_auth)', '\n', content)
+new_block = f\"\ndashboard:\\n  basic_auth:\\n    username: {username}\\n    password: \\\"{password}\\\"\\n\"
+if 'gateway:' in content:
+    content = content.replace('\ngateway:', new_block + '\ngateway:', 1)
+else:
+    content = content.rstrip() + new_block
+with open(config_path, 'w') as f:
+    f.write(content)
+print(f'[enterprise] Dashboard auth patched for user: {username}')
+" 2>/dev/null || true
+    fi
+fi
+
+# ==================== SOUL.MD ====================
+SOUL_FILE="${PROFILE_HOME}/SOUL.md"
+if [ "${PROFILE}" = "atendimento" ] && [ ! -f "${SOUL_FILE}" ]; then
+    if [ -f "/home/hermes/enterprise/soul/ana.md" ]; then
+        cp "/home/hermes/enterprise/soul/ana.md" "${SOUL_FILE}"
+        echo "[enterprise] Ana SOUL.md seeded"
+    fi
+fi
+if [ "${PROFILE}" = "admin" ] && [ ! -f "${SOUL_FILE}" ]; then
+    if [ -f "/home/hermes/enterprise/soul/admin.md" ]; then
+        cp "/home/hermes/enterprise/soul/admin.md" "${SOUL_FILE}"
+        echo "[enterprise] Admin SOUL.md seeded"
+    fi
+fi
+
+# ==================== ENTERPRISE SKILLS ====================
+if [ -d "/home/hermes/enterprise/skills/${PROFILE}" ]; then
+    if [ -f "/app/scripts/seed-sync.sh" ]; then
+        s6-setuidgid hermes /app/scripts/seed-sync.sh \
+            /home/hermes/enterprise "${PROFILE_HOME}" "${PROFILE}" 2>/dev/null || true
+        echo "[enterprise] Skills synced for ${PROFILE}"
+    else
+        cp -rf "/home/hermes/enterprise/skills/${PROFILE}/"* "${PROFILE_HOME}/skills/" 2>/dev/null || true
+        echo "[enterprise] Skills copied (legacy) for ${PROFILE}"
+    fi
+fi
+
+# ==================== ANA SCHEMA ====================
+if [ "${SKIP_ANA_SCHEMA:-}" != "true" ] && [ -n "${HERMES_PG_HOST:-}" ]; then
+    echo "[enterprise] Ensuring ana schema on ${HERMES_PG_HOST}..."
+    for i in 1 2 3; do
+        if s6-setuidgid hermes "${HERMES_INSTALL}/.venv/bin/python" -c "
+import os, sys
+try:
+    import pg8000
+except ImportError:
+    sys.exit(0)
+sql_path = '/home/hermes/enterprise/mcp/ana_sessions.sql'
+if not os.path.exists(sql_path):
+    sys.exit(0)
+try:
+    conn = pg8000.connect(
+        host=os.environ.get('HERMES_PG_HOST'),
+        port=int(os.environ.get('HERMES_PG_PORT', '5432')),
+        database=os.environ.get('HERMES_PG_DATABASE', 'hermes'),
+        user=os.environ.get('HERMES_PG_USER', 'hermes'),
+        password=os.environ.get('HERMES_PG_PASSWORD', ''),
+    )
+    with open(sql_path) as f:
+        sql = f.read()
+    cur = conn.cursor()
+    for stmt in sql.split(';'):
+        s = stmt.strip()
+        if s:
+            cur.execute(s)
+    conn.commit()
+    cur.close()
+    conn.close()
+    print('[enterprise] ana schema ensured')
+except Exception as e:
+    print(f'[enterprise] WARN: ana schema failed: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>/dev/null; then
+            break
+        else
+            echo "[enterprise] ana schema attempt $i failed, retrying in 5s..."
+            sleep 5
+        fi
+    done
+fi
+
+# ==================== EXPORT PROFILE HERMES_HOME ====================
+# Write to s6 container_environment so all services see the profile path
+mkdir -p /run/s6/container_environment
+printf '%s' "${PROFILE_HOME}" > /run/s6/container_environment/HERMES_HOME
+
+echo "[enterprise] HERMES_HOME → ${PROFILE_HOME}"
+echo "[enterprise] Enterprise setup complete for profile: ${PROFILE}"
