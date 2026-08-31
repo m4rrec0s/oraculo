@@ -55,6 +55,10 @@ services:
       # --- Profile selection (entrypoint reads ENTERPRISE_PROFILE) ---
       ENTERPRISE_PROFILE: admin
       AGENT_NAME: Hermes
+      # CMD runs under s6-overlay /init — mark as supervised child
+      HERMES_S6_SUPERVISED_CHILD: "1"
+      # Keep legacy migration from starting a second s6 gateway.
+      HERMES_GATEWAY_NO_SUPERVISE: "1"
       # --- Admin model: NVIDIA Nemotron ---
       MODEL_PROVIDER: nvidia
       MODEL_NAME: nvidia/nemotron-3-super-120b-a12b
@@ -91,7 +95,6 @@ services:
       HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-DEBUG}
       HERMES_TUI: ${HERMES_TUI:-false}
       HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
-      HERMES_GATEWAY_NO_SUPERVISE: "1"
       HOME: /home/hermes
     working_dir: /home/hermes
     volumes:
@@ -99,6 +102,7 @@ services:
       - ./enterprise:/app/enterprise
       - ./docker:/app/docker
       - ./scripts:/app/scripts
+      - ./hermes_cli/web_dist:/opt/hermes/hermes_cli/web_dist
     ports:
       - "8081:8081"
       - "9119:9119"
@@ -127,12 +131,16 @@ services:
       # --- Profile selection (entrypoint reads ENTERPRISE_PROFILE) ---
       ENTERPRISE_PROFILE: atendimento
       AGENT_NAME: Ana
-      # --- Ana model: OpenAI gpt-5-nano ---
-      MODEL_PROVIDER: openai
-      MODEL_NAME: gpt-5-nano
-      MODEL_BASE_URL: https://api.openai.com/v1
-      API_KEY_VAR: OPENAI_API_KEY
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # CMD runs under s6-overlay /init — mark as supervised child
+      HERMES_S6_SUPERVISED_CHILD: "1"
+      # Keep legacy migration from starting a second s6 gateway.
+      HERMES_GATEWAY_NO_SUPERVISE: "1"
+      # --- Ana model: NVIDIA Nemotron 120B ---
+      MODEL_PROVIDER: nvidia
+      MODEL_NAME: nvidia/nemotron-3-super-120b-a12b
+      MODEL_BASE_URL: https://integrate.api.nvidia.com/v1
+      API_KEY_VAR: NVIDIA_API_KEY
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY}
       # --- API server (HTTP, Bearer API_SERVER_KEY) ---
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
@@ -154,7 +162,6 @@ services:
       HERMES_LOG_LEVEL: ${HERMES_LOG_LEVEL:-DEBUG}
       HERMES_TUI: ${HERMES_TUI:-false}
       HERMES_HEADLESS: ${HERMES_HEADLESS:-true}
-      HERMES_GATEWAY_NO_SUPERVISE: "1"
       HOME: /home/hermes
     working_dir: /home/hermes
     volumes:

@@ -1331,28 +1331,26 @@ export const api = {
     ),
   // ── Persona (Ana atendimento) endpoints ──────────────────────────────
   getPersonaPersonas: () =>
-    fetchJSON<{ personas: PersonaInfo[] }>("/api/persona/personas"),
+    fetchJSON<{ personas: PersonaInfo[] }>("/api/persona-personas"),
   getPersonaSessions: (persona: string, limit = 50, offset = 0) =>
     fetchJSON<PersonaSessionsResponse>(
-      `/api/persona/sessions?persona=${encodeURIComponent(persona)}&limit=${limit}&offset=${offset}`,
+      `/api/persona-sessions?persona=${encodeURIComponent(persona)}&limit=${limit}&offset=${offset}`,
     ),
   renamePersonaSession: (sessionId: string, title: string) =>
-    fetchJSON<ActionResponse>("/api/persona/sessions/rename", {
+    fetchJSON<ActionResponse>(`/api/persona-sessions/${encodeURIComponent(sessionId)}/rename`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, title }),
+      body: JSON.stringify({ name: title }),
     }),
   togglePersonaSession: (sessionId: string) =>
-    fetchJSON<ActionResponse>("/api/persona/sessions/toggle", {
+    fetchJSON<ActionResponse>(`/api/persona-sessions/${encodeURIComponent(sessionId)}/toggle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId }),
     }),
   deletePersonaSession: (sessionId: string) =>
-    fetchJSON<ActionResponse>("/api/persona/sessions/delete", {
+    fetchJSON<ActionResponse>(`/api/persona-sessions/${encodeURIComponent(sessionId)}/delete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId }),
     }),
 };
 

@@ -17503,7 +17503,7 @@ async def pty_ws(ws: WebSocket) -> None:
     # A fresh xterm cannot reliably reconstruct the TUI from an arbitrary
     # bounded tail of alternate-screen, differential ANSI output. Reused PTYs
     # emit a complete frame after replay so reconnects never reopen blank.
-    await session.attach(ws, force_redraw=not _created)
+    await session.attach(ws)
 
     # --- writer loop: WebSocket → PTY master ----------------------------
     # No reader task here: the session's drain task (spawned once per PTY,

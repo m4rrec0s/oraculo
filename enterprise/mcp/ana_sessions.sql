@@ -4,6 +4,7 @@
 -- Tabela de sessões da Ana por cliente
 CREATE TABLE IF NOT EXISTS ana_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    persona VARCHAR(50) NOT NULL DEFAULT 'atendimento',
     cell VARCHAR(20) NOT NULL,  -- Número do cliente (ex: 5583999999999)
     session_id VARCHAR(100) UNIQUE NOT NULL,  -- ID da sessão Hermes
     status VARCHAR(20) DEFAULT 'active',  -- active, archived, blocked
@@ -14,6 +15,10 @@ CREATE TABLE IF NOT EXISTS ana_sessions (
     metadata JSONB DEFAULT '{}'  -- Dados extras do cliente
 );
 
+-- Upgrade installations created before persona-aware storage.
+ALTER TABLE ana_sessions
+    ADD COLUMN IF NOT EXISTS persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
+
 -- Índices para busca rápida
 CREATE INDEX IF NOT EXISTS idx_ana_sessions_cell ON ana_sessions(cell);
 CREATE INDEX IF NOT EXISTS idx_ana_sessions_status ON ana_sessions(status);
@@ -22,6 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_ana_sessions_last_message ON ana_sessions(last_me
 -- Tabela de mensagens da Ana (histórico por sessão)
 CREATE TABLE IF NOT EXISTS ana_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    persona VARCHAR(50) NOT NULL DEFAULT 'atendimento',
     session_id VARCHAR(100) NOT NULL REFERENCES ana_sessions(session_id),
     role VARCHAR(20) NOT NULL,  -- user, assistant, system
     content TEXT NOT NULL,
@@ -30,9 +36,14 @@ CREATE TABLE IF NOT EXISTS ana_messages (
     tool_calls JSONB DEFAULT '[]'
 );
 
+ALTER TABLE ana_messages
+    ADD COLUMN IF NOT EXISTS persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
+
 -- Índices para mensagens
 CREATE INDEX IF NOT EXISTS idx_ana_messages_session ON ana_messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_ana_messages_created ON ana_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_ana_sessions_persona ON ana_sessions(persona);
+CREATE INDEX IF NOT EXISTS idx_ana_messages_persona ON ana_messages(persona);
 
 -- Tabela de audit log para mudanças autônomas
 CREATE TABLE IF NOT EXISTS hermes_audit_log (

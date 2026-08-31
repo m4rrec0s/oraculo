@@ -79,15 +79,25 @@ if [ ! -d "${PROFILE_HOME}" ]; then
     fi
 fi
 
-# Ensure profile subdirs
-s6-setuidgid hermes mkdir -p \
+# Ensure profile subdirs (as root first for dirs under root-owned parents)
+mkdir -p \
     "${PROFILE_HOME}/skills" \
     "${PROFILE_HOME}/sessions" \
     "${PROFILE_HOME}/logs" \
+    "${PROFILE_HOME}/logs/gateways/default" \
     "${PROFILE_HOME}/memories" \
     "${PROFILE_HOME}/cron" \
     "${PROFILE_HOME}/skins" \
     "${PROFILE_HOME}/plans" 2>/dev/null || true
+chown -R hermes:hermes "${PROFILE_HOME}" 2>/dev/null || true
+
+# Ensure default profile exists under HERMES_HOME (reconciler expects it)
+_DEFAULT_PROFILE="${HERMES_HOME}/profiles/default"
+mkdir -p "${_DEFAULT_PROFILE}" 2>/dev/null || true
+if [ ! -f "${_DEFAULT_PROFILE}/.profile_marker" ] && [ -d "${_DEFAULT_PROFILE}" ]; then
+    touch "${_DEFAULT_PROFILE}/.profile_marker" 2>/dev/null || true
+fi
+mkdir -p "${_DEFAULT_PROFILE}/logs/gateways/default" 2>/dev/null || true
 
 # ==================== CONFIG GENERATION ====================
 # Regenerate if model changed; patch API key rotation in-place
@@ -268,7 +278,9 @@ try:
     import pg8000
 except ImportError:
     sys.exit(0)
-sql_path = '/home/hermes/enterprise/mcp/ana_sessions.sql'
+sql_path = '/opt/hermes/enterprise/mcp/ana_sessions.sql'
+if not os.path.exists(sql_path):
+    sql_path = '/app/enterprise/mcp/ana_sessions.sql'
 if not os.path.exists(sql_path):
     sys.exit(0)
 try:
