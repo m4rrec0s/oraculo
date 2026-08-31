@@ -1,0 +1,9 @@
+# Upstream sync tracking
+# This file records the last synced upstream version.
+# Updated automatically by scripts/sync-upstream.sh
+
+upstream_repo: https://github.com/NousResearch/hermes-agent.git
+target_tag: v2026.8.27
+target_sha: fcebd62163
+synced_at: 2026-08-31T12:00:00Z
+synced_by: sync-upstream.sh

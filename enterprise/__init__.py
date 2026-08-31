@@ -12,12 +12,14 @@ Estrutura:
 - cli: Comandos CLI enterprise
 """
 
-from enterprise.permissions.manager import PermissionManager, Profile
-from enterprise.config.settings import EnterpriseConfig
-
 __version__ = "1.0.0"
-__all__ = [
-    "PermissionManager",
-    "Profile",
-    "EnterpriseConfig",
-]
+
+# Lazy imports — only available when full enterprise deps are installed
+# (structlog, pydantic_settings, etc.). Core modules like ana_pg_store
+# must NOT trigger these imports.
+try:
+    from enterprise.permissions.manager import PermissionManager, Profile
+    from enterprise.config.settings import EnterpriseConfig
+    __all__ = ["PermissionManager", "Profile", "EnterpriseConfig"]
+except ImportError:
+    __all__ = []

@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router";
 import { api, setManagementProfile } from "@/lib/api";
 import { ProfileContext } from "@/contexts/profile-context";
 
@@ -54,12 +54,25 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   // over current state — it's an explicit scope request.
   const urlProfile = searchParams.get("profile");
   useEffect(() => {
+    // Atendimento reads the shared persona store, not a selected management
+    // profile. Keep its URL stable while preserving selection elsewhere.
+    if (pathname === "/atendimento" && urlProfile !== null) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("profile");
+          return next;
+        },
+        { replace: true },
+      );
+      return;
+    }
     if (urlProfile !== null && urlProfile !== profile) {
       setManagementProfile(urlProfile);
       setProfileState(urlProfile);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlProfile]);
+  }, [pathname, urlProfile]);
 
   // Re-assert ?profile= after navigations that dropped it (bare nav links).
   // Runs on every pathname/profile change; no-ops when already in sync.

@@ -25,7 +25,9 @@ def adapter():
 
 def _ana_app(adapter: APIServerAdapter) -> web.Application:
     app = web.Application()
-    app.router.add_post("/api/ana/message", adapter._handle_ana_message)
+    # The route is registered via the enterprise hook
+    from enterprise.mcp.ana_api_handler import handle_ana_message
+    app.router.add_post("/api/ana/message", lambda req: handle_ana_message(adapter, req))
     return app
 
 
@@ -39,13 +41,15 @@ def _auth_headers():
 
 
 class TestAnaSessionIdFormat:
-    def test_default_persona_prefix(self, adapter):
+    def test_default_persona_prefix(self):
+        from enterprise.mcp.ana_pg_store import ana_pg_session_id
         with patch.dict(os.environ, {"ENTERPRISE_PROFILE": "atendimento"}, clear=False):
-            assert adapter._ana_pg_session_id("5511999999999") == "atendimento_5511999999999"
+            assert ana_pg_session_id("5511999999999") == "atendimento_5511999999999"
 
-    def test_custom_persona_prefix(self, adapter):
+    def test_custom_persona_prefix(self):
+        from enterprise.mcp.ana_pg_store import ana_pg_session_id
         with patch.dict(os.environ, {"ENTERPRISE_PROFILE": "honda"}, clear=False):
-            assert adapter._ana_pg_session_id("551188887777") == "honda_551188887777"
+            assert ana_pg_session_id("551188887777") == "honda_551188887777"
 
 
 # ---------------------------------------------------------------------------
@@ -67,8 +71,8 @@ class TestAnaHistoryFromPostgres:
             call_log.append(session_id)
             return pg_history if call_log.__len__() <= 1 else []
 
-        monkeypatch.setattr(adapter, "_load_ana_session_from_pg", lambda sid: {"updated_at": 1000.0, "created_at": 999.0})
-        monkeypatch.setattr(adapter, "_load_ana_history_from_pg", _mock_load_history)
+        monkeypatch.setattr("enterprise.mcp.ana_pg_store.load_ana_session_from_pg", lambda sid: {"updated_at": 1000.0, "created_at": 999.0})
+        monkeypatch.setattr("enterprise.mcp.ana_pg_store.load_ana_history_from_pg", _mock_load_history)
 
         mock_run = AsyncMock(return_value=({"final_response": "ok", "session_id": "atendimento_5511999"}, {}))
         monkeypatch.setattr(adapter, "_run_agent", mock_run)
@@ -106,8 +110,8 @@ class TestAnaHistoryFromPostgres:
             return {"final_response": "ok", "session_id": kwargs.get("session_id")}, {}
 
         monkeypatch.setattr(adapter, "_run_agent", _mock_run)
-        monkeypatch.setattr(adapter, "_load_ana_session_from_pg", lambda sid: None)
-        monkeypatch.setattr(adapter, "_load_ana_history_from_pg", lambda sid: [])
+        monkeypatch.setattr("enterprise.mcp.ana_pg_store.load_ana_session_from_pg", lambda sid: None)
+        monkeypatch.setattr("enterprise.mcp.ana_pg_store.load_ana_history_from_pg", lambda sid: [])
         monkeypatch.setattr(adapter, "config", PlatformConfig(enabled=True, extra={"use_postgres": False}))
 
         app = _ana_app(adapter)
@@ -124,8 +128,8 @@ class TestAnaHistoryFromPostgres:
     @pytest.mark.asyncio
     async def test_pg_not_found_returns_empty_history(self, adapter, monkeypatch):
         """When session doesn't exist in PG, history must be empty (fresh start)."""
-        monkeypatch.setattr(adapter, "_load_ana_session_from_pg", lambda sid: None)
-        monkeypatch.setattr(adapter, "_load_ana_history_from_pg", lambda sid: [])
+        monkeypatch.setattr("enterprise.mcp.ana_pg_store.load_ana_session_from_pg", lambda sid: None)
+        monkeypatch.setattr("enterprise.mcp.ana_pg_store.load_ana_history_from_pg", lambda sid: [])
 
         mock_run = AsyncMock(return_value=({"final_response": "fresh", "session_id": "atendimento_x"}, {}))
         monkeypatch.setattr(adapter, "_run_agent", mock_run)
@@ -156,27 +160,17 @@ class TestAnaHistoryFromPostgres:
         def _mock_delete_pg(sid):
             deleted_in_pg.append(sid)
 
-        monkeypatch.setattr(adapter, "_load_ana_session_from_pg", _mock_load_session)
-        monkeypatch.setattr(adapter, "_load_ana_history_from_pg", _mock_load_history)
+        monkeypatch.setattr("enterprise.mcp.ana_pg_store.load_ana_session_from_pg", _mock_load_session)
+        monkeypatch.setattr("enterprise.mcp.ana_pg_store.load_ana_history_from_pg", _mock_load_history)
+        monkeypatch.setattr("enterprise.mcp.ana_pg_store.reset_ana_session_in_pg", _mock_delete_pg)
         monkeypatch.setattr(adapter, "config", PlatformConfig(enabled=True, extra={"use_postgres": False}))
 
         mock_run = AsyncMock(return_value=({"final_response": "ok", "session_id": "atendimento_old"}, {}))
         monkeypatch.setattr(adapter, "_run_agent", mock_run)
 
-        # Patch pg8000 and _pg_connect_kwargs to simulate the idle-delete path
-        fake_pg = type("FakePG", (), {"connect": lambda **kw: type("Conn", (), {
-            "cursor": lambda self: type("Cur", (), {
-                "execute": lambda self, sql, *a: None,
-                "commit": lambda self: None,
-                "close": lambda self: None,
-            })(),
-            "close": lambda self: None,
-        })()})
-
         app = _ana_app(adapter)
-        # The idle check uses _ana_idle_seconds; with updated_at=1.0 it's always idle
-        with patch.dict(os.environ, {"ENTERPRISE_PROFILE": "atendimento"}, clear=False), \
-             patch("gateway.platforms.api_server.pg8000", fake_pg, create=True):
+        # The idle check uses ana_idle_seconds; with updated_at=1.0 it's always idle
+        with patch.dict(os.environ, {"ENTERPRISE_PROFILE": "atendimento"}, clear=False):
             async with TestClient(TestServer(app)) as cli:
                 resp = await cli.post(
                     "/api/ana/message",
