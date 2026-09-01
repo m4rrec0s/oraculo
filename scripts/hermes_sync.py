@@ -48,7 +48,7 @@ PROTECTED = (
     # Ana persona / sessões / dashboard
     "enterprise/",
     "skills/cesto-damore/",
-    "hermes_cli/ana_dashboard.py",
+    "hermes_cli/persona_dashboard.py",
     "gateway/platforms/api_server.py",       # MIXED: sessões Postgres do Ana
     "hermes_cli/web_server.py",              # MIXED: auth + rotas enterprise
     "hermes_cli/pty_session.py",             # MIXED

@@ -24,20 +24,20 @@ MIGRATE_SQL = """
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_name='ana_sessions' AND column_name='persona') THEN
-        ALTER TABLE ana_sessions ADD COLUMN persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
-        CREATE INDEX IF NOT EXISTS idx_ana_sessions_persona ON ana_sessions(persona);
-        RAISE NOTICE 'ana_sessions.persona adicionada';
+                    WHERE table_name='sessions' AND column_name='persona') THEN
+         ALTER TABLE sessions ADD COLUMN persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
+         CREATE INDEX IF NOT EXISTS idx_sessions_persona ON sessions(persona);
+         RAISE NOTICE 'sessions.persona adicionada';
     ELSE
-        RAISE NOTICE 'ana_sessions.persona ja existe';
+        RAISE NOTICE 'sessions.persona ja existe';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_name='ana_messages' AND column_name='persona') THEN
-        ALTER TABLE ana_messages ADD COLUMN persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
-        CREATE INDEX IF NOT EXISTS idx_ana_messages_persona ON ana_messages(persona);
-        RAISE NOTICE 'ana_messages.persona adicionada';
+                    WHERE table_name='messages' AND column_name='persona') THEN
+         ALTER TABLE messages ADD COLUMN persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
+         CREATE INDEX IF NOT EXISTS idx_messages_persona ON messages(persona);
+         RAISE NOTICE 'messages.persona adicionada';
     ELSE
-        RAISE NOTICE 'ana_messages.persona ja existe';
+        RAISE NOTICE 'messages.persona ja existe';
     END IF;
 END $$;
 """

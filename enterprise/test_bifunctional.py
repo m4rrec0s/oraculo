@@ -75,12 +75,12 @@ async def test_tool_guard():
     print("✓ Todos os testes de tool guard passaram!")
 
 
-async def test_ana_sessions():
-    """Testa as sessões da Ana (requer PostgreSQL)."""
-    print("\n=== Teste: Ana Sessions ===")
+async def test_persona_sessions():
+    """Testa as sessões por persona (requer PostgreSQL)."""
+    print("\n=== Teste: Persona Sessions ===")
     
     try:
-        from enterprise.mcp.ana_sessions import (
+        from enterprise.mcp.session_store import (
             get_or_create_session,
             save_message,
             get_conversation_history,
@@ -123,7 +123,7 @@ async def test_audit_log():
     print("\n=== Teste: Audit Log ===")
     
     try:
-        from enterprise.mcp.ana_sessions import log_audit, get_audit_log
+        from enterprise.mcp.session_store import log_audit, get_audit_log
         
         # Teste 1: Log de auditoria
         await log_audit(
@@ -158,7 +158,7 @@ async def main():
     await test_tool_guard()
     
     # Testes que precisam de PostgreSQL
-    await test_ana_sessions()
+    await test_persona_sessions()
     await test_audit_log()
     
     print("\n" + "=" * 60)

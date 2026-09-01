@@ -46,7 +46,7 @@ async def read_agent_sessions(
         Lista de sessões
     """
     try:
-        from enterprise.mcp.ana_sessions import get_pool
+        from enterprise.mcp.session_store import get_pool
         
         pool = await get_pool()
         
@@ -56,7 +56,7 @@ async def read_agent_sessions(
                 rows = await conn.fetch("""
                     SELECT session_id, persona, cell, status, message_count, 
                            last_message_at, created_at
-                    FROM ana_sessions
+                    FROM sessions
                     WHERE persona = $2 AND status = 'active'
                     ORDER BY last_message_at DESC
                     LIMIT $1
@@ -88,14 +88,14 @@ async def read_session_messages(
         Lista de mensagens
     """
     try:
-        from enterprise.mcp.ana_sessions import get_pool
+        from enterprise.mcp.session_store import get_pool
         
         pool = await get_pool()
         
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT role, content, created_at, tokens_used
-                FROM ana_messages
+                    FROM messages
                 WHERE session_id = $1
                 ORDER BY created_at DESC
                 LIMIT $2
@@ -239,7 +239,7 @@ async def apply_improvement(
         True se aplicada com sucesso
     """
     try:
-        from enterprise.mcp.ana_sessions import log_audit
+        from enterprise.mcp.session_store import log_audit
         
         improvement_type = improvement.get("type")
         target = improvement.get("target")

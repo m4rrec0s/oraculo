@@ -105,7 +105,7 @@ log "Installing dependencies..."
 pip install --quiet aiohttp 2>/dev/null && ok "aiohttp installed" || warn "aiohttp install failed (non-fatal)"
 
 # ==================== 1b. ANA SESSIONS SCHEMA (Hermes PG dedicado) ====================
-# Cria ana_sessions / ana_messages no Postgres dedicado do Hermes (HERMES_PG_*).
+# Cria sessions / messages no Postgres dedicado do Hermes (HERMES_PG_*).
 # Idempotente (CREATE IF NOT EXISTS). Roda em admin E atendimento.
 # Skip if SKIP_ANA_SCHEMA=true (para evitar race condition com múltiplos containers)
 if [[ "${SKIP_ANA_SCHEMA:-}" == "true" ]]; then
@@ -128,9 +128,9 @@ except ImportError:
 if pg8000 is None:
     print("[ENTERPRISE] pg8000 unavailable — skipping ana schema")
     sys.exit(0)
-sql_path = "/home/hermes/enterprise/mcp/ana_sessions.sql"
+sql_path = "/home/hermes/enterprise/mcp/sessions.sql"
 if not os.path.exists(sql_path):
-    print("[ENTERPRISE] ana_sessions.sql not found — skipping")
+    print("[ENTERPRISE] sessions.sql not found — skipping")
     sys.exit(0)
 try:
     conn = pg8000.connect(
@@ -143,14 +143,34 @@ try:
     with open(sql_path) as f:
         sql = f.read()
     cur = conn.cursor()
-    for stmt in sql.split(";"):
+    # Keep dollar-quoted PL/pgSQL blocks intact while retaining compatibility
+    # with pg8000's single-statement execute path.
+    statements = []
+    current = []
+    in_dollar_block = False
+    for line in sql.splitlines(True):
+        current.append(line)
+        stripped = line.strip()
+        if stripped.startswith("DO $$"):
+            in_dollar_block = True
+        if in_dollar_block:
+            if stripped == "END $$;":
+                statements.append("".join(current))
+                current = []
+                in_dollar_block = False
+        elif stripped.endswith(";"):
+            statements.append("".join(current))
+            current = []
+    if current:
+        statements.append("".join(current))
+    for stmt in statements:
         s = stmt.strip()
         if s:
             cur.execute(s)
     conn.commit()
     cur.close()
     conn.close()
-    print("[ENTERPRISE] ana_sessions schema ensured")
+    print("[ENTERPRISE] sessions schema ensured")
     sys.exit(0)
 except Exception as e:
     print(f"[ENTERPRISE] WARN: ana schema ensure failed: {e}")
@@ -158,7 +178,7 @@ except Exception as e:
 PYEOF
     then
       ensured=1
-      ok "ana_sessions schema ensured (attempt $i)"
+      ok "sessions schema ensured (attempt $i)"
       break
     else
       warn "ana schema ensure attempt $i failed, retrying in 10s..."
@@ -166,7 +186,7 @@ PYEOF
     fi
   done
   if [[ $ensured -eq 0 ]]; then
-    err "ana_sessions schema NOT ensured after retries — Ana sessions persistence disabled"
+    err "sessions schema NOT ensured after retries — persona sessions persistence disabled"
   fi
 fi
 
@@ -386,9 +406,9 @@ fi
 # ==================== 3b. SOUL.MD (persona) ====================
 SOUL_FILE="${PROFILE_HOME}/SOUL.md"
 if [[ "${PROFILE}" == "atendimento" && ! -f "${SOUL_FILE}" ]]; then
-    if [[ -f "/home/hermes/enterprise/soul/ana.md" ]]; then
-        cp "/home/hermes/enterprise/soul/ana.md" "${SOUL_FILE}"
-        ok "Ana SOUL.md seeded from enterprise/soul/ana.md"
+    if [[ -f "/home/hermes/enterprise/soul/atendimento.md" ]]; then
+        cp "/home/hermes/enterprise/soul/atendimento.md" "${SOUL_FILE}"
+        ok "Atendimento SOUL.md seeded from enterprise/soul/atendimento.md"
     else
         log "Writing Ana persona to SOUL.md..."
         cat > "${SOUL_FILE}" << 'SOULEOF'

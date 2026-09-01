@@ -2249,8 +2249,8 @@ class APIServerAdapter(BasePlatformAdapter):
             ("POST", "/api/sessions/{session_id}/fork", self._handle_fork_session),
             ("POST", "/api/sessions/{session_id}/chat", self._handle_session_chat),
             ("POST", "/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream),
-            # Ana atendente route — enterprise hook (enterprise/mcp/ana_routes.py)
-            *self._enterprise_ana_routes(),
+            # Persona atendente route — enterprise hook (enterprise/mcp/persona_routes.py)
+            *self._enterprise_persona_routes(),
             ("POST", "/api/sessions/{session_id}/model", self._handle_session_model_lock),
             ("POST", "/v1/chat/completions", self._handle_chat_completions),
             ("POST", "/v1/responses", self._handle_responses),
@@ -2281,15 +2281,15 @@ class APIServerAdapter(BasePlatformAdapter):
             routes.append(("POST", "/api/cron/fire", self._handle_cron_fire))
         return routes
 
-    def _enterprise_ana_routes(self) -> List[tuple]:
-        """Hook for enterprise Ana atendente routes (enterprise/mcp/ana_routes.py).
+    def _enterprise_persona_routes(self) -> List[tuple]:
+        """Hook for enterprise persona atendente routes (enterprise/mcp/persona_routes.py).
 
         Returns an empty list when the enterprise module is not available,
         so the core API server works without it.
         """
         try:
-            from enterprise.mcp.ana_routes import ana_route_table
-            return ana_route_table(self)
+            from enterprise.mcp.persona_routes import persona_route_table
+            return persona_route_table(self)
         except ImportError:
             return []
 
@@ -8309,8 +8309,8 @@ class APIServerAdapter(BasePlatformAdapter):
             self._run_statuses.pop(run_id, None)
 
     # ------------------------------------------------------------------
-    # Ana atendente (Cesto d'Amore) — extracted to enterprise/mcp/ana_pg_store.py
-    # The route is registered via _enterprise_ana_routes() hook above.
+    # Persona atendente (Cesto d'Amore) — extracted to enterprise/mcp/pg_session_store.py
+    # The route is registered via _enterprise_persona_routes() hook above.
     # ------------------------------------------------------------------
 
 

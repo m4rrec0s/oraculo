@@ -244,8 +244,8 @@ fi
 # ==================== SOUL.MD ====================
 SOUL_FILE="${PROFILE_HOME}/SOUL.md"
 if [ "${PROFILE}" = "atendimento" ] && [ ! -f "${SOUL_FILE}" ]; then
-    if [ -f "/home/hermes/enterprise/soul/ana.md" ]; then
-        cp "/home/hermes/enterprise/soul/ana.md" "${SOUL_FILE}"
+    if [ -f "/home/hermes/enterprise/soul/atendimento.md" ]; then
+        cp "/home/hermes/enterprise/soul/atendimento.md" "${SOUL_FILE}"
         echo "[enterprise] Ana SOUL.md seeded"
     fi
 fi
@@ -278,9 +278,9 @@ try:
     import pg8000
 except ImportError:
     sys.exit(0)
-sql_path = '/opt/hermes/enterprise/mcp/ana_sessions.sql'
+sql_path = '/opt/hermes/enterprise/mcp/sessions.sql'
 if not os.path.exists(sql_path):
-    sql_path = '/app/enterprise/mcp/ana_sessions.sql'
+    sql_path = '/app/enterprise/mcp/sessions.sql'
 if not os.path.exists(sql_path):
     sys.exit(0)
 try:

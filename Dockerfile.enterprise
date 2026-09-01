@@ -53,7 +53,7 @@ COPY --chown=hermes:hermes enterprise/config /home/hermes/.hermes/enterprise/con
 COPY --chown=hermes:hermes skills/cesto-damore /home/hermes/.hermes/skills/cesto-damore
 COPY --chown=hermes:hermes enterprise/skills /home/hermes/enterprise/skills
 COPY --chown=hermes:hermes enterprise/soul /home/hermes/enterprise/soul
-COPY --chown=hermes:hermes enterprise/mcp/ana_sessions.sql /home/hermes/enterprise/mcp/ana_sessions.sql
+COPY --chown=hermes:hermes enterprise/mcp/sessions.sql /home/hermes/enterprise/mcp/sessions.sql
 # Built frontend assets (produced by CI before the docker build)
 COPY --chown=hermes:hermes hermes_cli/web_dist /app/hermes_cli/web_dist
 COPY --chown=hermes:hermes ui-tui/dist /app/ui-tui/dist

@@ -1,5 +1,5 @@
 """
-Postgres-backed session store for the Ana atendente persona.
+Postgres-backed session store for atendente personas.
 
 Extracted from gateway/platforms/api_server.py to keep Oraculo-specific
 code outside the upstream core. This module is imported by the API server
@@ -16,7 +16,7 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
-def ana_idle_seconds(ts: Any) -> float:
+def idle_seconds(ts: Any) -> float:
     """Idle time (seconds) since a session timestamp; 0.0 if unknown."""
     if ts is None:
         return 0.0
@@ -63,7 +63,7 @@ def pg_connect_kwargs() -> Optional[dict]:
                 from urllib.parse import unquote
                 kwargs["password"] = unquote(password)
             return kwargs
-        logger.warning("ana persist: DATABASE_URL parse failed, trying HERMES_PG_*")
+            logger.warning("persona persist: DATABASE_URL parse failed, trying HERMES_PG_*")
     host = os.environ.get("HERMES_PG_HOST")
     if not host:
         return None
@@ -76,7 +76,7 @@ def pg_connect_kwargs() -> Optional[dict]:
     }
 
 
-def ana_pg_session_id(session_key: str) -> str:
+def pg_session_id(session_key: str) -> str:
     """Canonical Postgres session_id for an Ana persona turn.
 
     Matches the ``{persona}_{session_key}`` convention.
@@ -85,8 +85,8 @@ def ana_pg_session_id(session_key: str) -> str:
     return f"{persona}_{session_key}"
 
 
-def persist_ana_turn(session_key: str, user_msg: str, assistant_msg: str, push_name: str | None = None) -> None:
-    """Upsert the Ana session + append user/assistant messages to the
+def persist_turn(session_key: str, user_msg: str, assistant_msg: str, push_name: str | None = None) -> None:
+    """Upsert the persona session + append user/assistant messages to the
     dedicated Hermes Postgres (``DATABASE_URL`` — internal swarm DSN).
     Best-effort: any failure is swallowed so a DB hiccup never breaks the
     customer turn."""
@@ -106,17 +106,17 @@ def persist_ana_turn(session_key: str, user_msg: str, assistant_msg: str, push_n
         conn = pg8000.connect(**kwargs)
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO ana_sessions (persona, cell, session_id, status, last_message_at, message_count, updated_at, metadata)
+            """INSERT INTO sessions (persona, cell, session_id, status, last_message_at, message_count, updated_at, metadata)
                VALUES (%s, %s, %s, 'active', NOW(), 1, NOW(), %s)
                ON CONFLICT (session_id) DO UPDATE SET
                  persona = %s,
                  last_message_at = NOW(), updated_at = NOW(),
-                 message_count = ana_sessions.message_count + 1,
-                 status = CASE WHEN ana_sessions.status = 'archived' THEN 'active' ELSE ana_sessions.status END""",
+                 message_count = sessions.message_count + 1,
+                 status = CASE WHEN sessions.status = 'archived' THEN 'active' ELSE sessions.status END""",
             (persona, cell, sid, _json.dumps({"name": push_name}) if push_name else None, persona),
         )
         cur.execute(
-            """INSERT INTO ana_messages (persona, session_id, role, content, created_at)
+            """INSERT INTO messages (persona, session_id, role, content, created_at)
                VALUES (%s, %s, 'user', %s, NOW()),
                       (%s, %s, 'assistant', %s, NOW())""",
             (persona, sid, user_msg, persona, sid, assistant_msg),
@@ -128,7 +128,7 @@ def persist_ana_turn(session_key: str, user_msg: str, assistant_msg: str, push_n
         logger.debug("ana persist error: %s", exc)
 
 
-def load_ana_session_from_pg(session_id: str) -> Optional[dict]:
+def load_session_from_pg(session_id: str) -> Optional[dict]:
     """Fetch session metadata from dedicated Hermes Postgres.
 
     Returns a dict with ``updated_at`` / ``created_at`` as float epochs,
@@ -145,7 +145,7 @@ def load_ana_session_from_pg(session_id: str) -> Optional[dict]:
         conn = pg8000.connect(**kwargs)
         cur = conn.cursor()
         cur.execute(
-            "SELECT updated_at, created_at FROM ana_sessions WHERE session_id = %s",
+            "SELECT updated_at, created_at FROM sessions WHERE session_id = %s",
             (session_id,),
         )
         row = cur.fetchone()
@@ -169,7 +169,7 @@ def load_ana_session_from_pg(session_id: str) -> Optional[dict]:
         return None
 
 
-def load_ana_history_from_pg(session_id: str) -> list:
+def load_history_from_pg(session_id: str) -> list:
     """Load conversation history for an Ana session from dedicated Postgres.
 
     Returns a list of ``{"role": ..., "content": ..., "timestamp": ...}``
@@ -187,7 +187,7 @@ def load_ana_history_from_pg(session_id: str) -> list:
         cur = conn.cursor()
         cur.execute(
             """SELECT role, content, created_at
-               FROM ana_messages
+               FROM messages
                WHERE session_id = %s
                ORDER BY created_at ASC""",
             (session_id,),
@@ -211,7 +211,7 @@ def load_ana_history_from_pg(session_id: str) -> list:
         return []
 
 
-def ana_session_exists_in_pg(session_id: str) -> bool:
+def session_exists_in_pg(session_id: str) -> bool:
     """Return True if the session row exists in dedicated Postgres."""
     try:
         import pg8000
@@ -224,7 +224,7 @@ def ana_session_exists_in_pg(session_id: str) -> bool:
         conn = pg8000.connect(**kwargs)
         cur = conn.cursor()
         cur.execute(
-            "SELECT 1 FROM ana_sessions WHERE session_id = %s LIMIT 1",
+            "SELECT 1 FROM sessions WHERE session_id = %s LIMIT 1",
             (session_id,),
         )
         found = cur.fetchone() is not None
@@ -236,7 +236,7 @@ def ana_session_exists_in_pg(session_id: str) -> bool:
         return False
 
 
-def reset_ana_session_in_pg(session_id: str) -> None:
+def reset_session_in_pg(session_id: str) -> None:
     """Delete session + messages from Postgres (idle timeout reset)."""
     try:
         import pg8000 as _pg
@@ -244,8 +244,8 @@ def reset_ana_session_in_pg(session_id: str) -> None:
         if _kw:
             _conn = _pg.connect(**_kw)
             _cur = _conn.cursor()
-            _cur.execute("DELETE FROM ana_messages WHERE session_id = %s", (session_id,))
-            _cur.execute("DELETE FROM ana_sessions WHERE session_id = %s", (session_id,))
+            _cur.execute("DELETE FROM messages WHERE session_id = %s", (session_id,))
+            _cur.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
             _conn.commit()
             _cur.close()
             _conn.close()

@@ -199,7 +199,7 @@ import asyncio
 import sys
 sys.path.insert(0, "/app")
 try:
-    from enterprise.mcp.ana_sessions import init_schema
+    from enterprise.mcp.session_store import init_schema
     asyncio.run(init_schema())
     print("[ENTERPRISE] session schema migrated OK")
 except Exception as exc:

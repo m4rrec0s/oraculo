@@ -5,7 +5,7 @@ All persona session routes (backed by the dedicated Hermes Postgres via
 ``DATABASE_URL``) live here so upstream edits to ``hermes_cli/web_server.py``
 never collide with Cesto's custom surface. Register with::
 
-    from hermes_cli.ana_dashboard import router as persona_router
+    from hermes_cli.persona_dashboard import router as persona_router
     app.include_router(persona_router)
 """
 
@@ -106,11 +106,11 @@ def _persona_sessions_query(persona: str = None, limit: int = 50, offset: int = 
             f"""SELECT s.persona, s.cell, s.session_id, s.status, s.message_count,
                       COALESCE(s.metadata->>'name', c.name, s.cell) AS session_label,
                       s.last_message_at, s.created_at, s.metadata,
-                      (SELECT content FROM ana_messages m
+                       (SELECT content FROM messages m
                        WHERE m.session_id = s.session_id
                        ORDER BY m.created_at DESC LIMIT 1) AS last_message
-               FROM ana_sessions s
-               LEFT JOIN ana_customers c ON s.cell = c.cell
+                FROM sessions s
+                LEFT JOIN customers c ON s.cell = c.cell
                {where}
                ORDER BY s.last_message_at DESC NULLS LAST
                LIMIT %s OFFSET %s""",
@@ -158,7 +158,7 @@ async def get_persona_personas():
         cur = conn.cursor()
         cur.execute(
             """SELECT persona, COUNT(*) AS session_count
-               FROM ana_sessions
+               FROM sessions
                GROUP BY persona
                ORDER BY persona""",
         )
@@ -191,7 +191,7 @@ async def rename_persona_session(session_id: str, request: Request):
     try:
         cur = conn.cursor()
         cur.execute(
-            """UPDATE ana_sessions
+            """UPDATE sessions
                SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{name}', to_jsonb(%s::text))
                WHERE session_id = %s""",
             (name, session_id),
@@ -219,13 +219,13 @@ async def toggle_persona_session(session_id: str):
         raise HTTPException(status_code=503, detail=f"Persona sessions store unavailable: {err or 'unknown'}")
     try:
         cur = conn.cursor()
-        cur.execute("SELECT status FROM ana_sessions WHERE session_id = %s", (session_id,))
+        cur.execute("SELECT status FROM sessions WHERE session_id = %s", (session_id,))
         row = cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="session not found")
         new = "closed" if row[0] == "active" else "active"
         cur.execute(
-            "UPDATE ana_sessions SET status = %s, updated_at = NOW() WHERE session_id = %s",
+            "UPDATE sessions SET status = %s, updated_at = NOW() WHERE session_id = %s",
             (new, session_id),
         )
         conn.commit()
@@ -248,8 +248,8 @@ async def delete_persona_session(session_id: str):
         raise HTTPException(status_code=503, detail=f"Persona sessions store unavailable: {err or 'unknown'}")
     try:
         cur = conn.cursor()
-        cur.execute("DELETE FROM ana_messages WHERE session_id = %s", (session_id,))
-        cur.execute("DELETE FROM ana_sessions WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM messages WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
         conn.commit()
         cur.close(); conn.close()
         return {"ok": True, "session_id": session_id}

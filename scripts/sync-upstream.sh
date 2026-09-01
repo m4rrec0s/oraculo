@@ -46,7 +46,7 @@ OUR_FILES=(
     "scripts/seed-sync.py"
     "scripts/seed-sync.sh"
     "scripts/hermes_sync.py"
-    "hermes_cli/ana_dashboard.py"
+    "hermes_cli/persona_dashboard.py"
     "web/src/pages/AtendimentoPage.tsx"
     "skills/cesto-damore/"
     "UPSTREAM_SYNC"

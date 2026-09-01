@@ -526,10 +526,10 @@ from hermes_cli.memory_oauth import router as _memory_oauth_router  # noqa: E402
 
 app.include_router(_memory_oauth_router)
 
-# Ana Atendimento dashboard routes (isolated blueprint — see ana_dashboard.py).
-from hermes_cli.ana_dashboard import router as _ana_router  # noqa: E402
+# Persona Atendimento dashboard routes (isolated blueprint — see persona_dashboard.py).
+from hermes_cli.persona_dashboard import router as _persona_router  # noqa: E402
 
-app.include_router(_ana_router)
+app.include_router(_persona_router)
 
 # ---------------------------------------------------------------------------
 # Session token for protecting sensitive endpoints (reveal).

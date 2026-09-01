@@ -58,12 +58,12 @@ WHATSAPP_PHONE_ID=xxx
 
 ```bash
 # Conectar ao PostgreSQL existente ou criar novo
-# O schema já está em enterprise/mcp/ana_sessions.py
+# O schema já está em enterprise/mcp/session_store.py
 
 # Executar setup do schema:
 python -c "
 import asyncio
-from enterprise.mcp.ana_sessions import init_schema
+from enterprise.mcp.session_store import init_schema
 asyncio.run(init_schema())
 "
 ```
@@ -149,10 +149,10 @@ Cada cliente (cell) tem:
 Exemplo:
 ```sql
 -- Sessão do cliente 5583999999999
-SELECT * FROM ana_sessions WHERE cell = '5583999999999';
+SELECT * FROM sessions WHERE cell = '5583999999999';
 
 -- Mensagens dessa sessão
-SELECT * FROM ana_messages WHERE session_id = 'ana-5583999999999-abc123';
+SELECT * FROM messages WHERE session_id = 'atendimento-5583999999999-abc123';
 ```
 
 ## Segurança
@@ -186,7 +186,7 @@ enterprise/
 ├── mcp/
 │   ├── erp_server.py          # Servidor ERP (Produtos, Pedidos)
 │   ├── whatsapp_server.py     # Servidor WhatsApp
-│   └── ana_sessions.py        # Sessões da Ana (PostgreSQL)
+│   └── session_store.py       # Sessões por persona (PostgreSQL)
 ├── middleware/
 │   ├── agent_router.py        # Routing por header
 │   └── tool_guard.py          # Restrição de tools
@@ -213,14 +213,14 @@ hermes profile list
 # Verificar sessões da Ana
 python -c "
 import asyncio
-from enterprise.mcp.ana_sessions import get_session_stats
+from enterprise.mcp.session_store import get_session_stats
 print(asyncio.run(get_session_stats()))
 "
 
 # Ver audit log
 python -c "
 import asyncio
-from enterprise.mcp.ana_sessions import get_audit_log
+from enterprise.mcp.session_store import get_audit_log
 logs = asyncio.run(get_audit_log())
 for log in logs[:10]:
     print(f\"{log['created_at']}: {log['action']} on {log['target']}\")

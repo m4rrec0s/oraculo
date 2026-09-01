@@ -15,7 +15,7 @@ Estrutura:
 __version__ = "1.0.0"
 
 # Lazy imports — only available when full enterprise deps are installed
-# (structlog, pydantic_settings, etc.). Core modules like ana_pg_store
+# (structlog, pydantic_settings, etc.). Core modules like pg_session_store
 # must NOT trigger these imports.
 try:
     from enterprise.permissions.manager import PermissionManager, Profile

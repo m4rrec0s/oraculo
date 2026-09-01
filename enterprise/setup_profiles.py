@@ -242,7 +242,7 @@ def setup_all_profiles():
     print("\nPróximos passos:")
     print("1. Configurar API keys em ~/.hermes/.env (admin)")
     print("2. Configurar API keys em ~/.hermes/profiles/ana/.env (ana)")
-    print("3. Configurar PostgreSQL (enterprise/mcp/ana_sessions.py)")
+    print("3. Configurar PostgreSQL (enterprise/mcp/session_store.py)")
     print("4. Executar: docker-compose -f docker-compose.enterprise.yml up")
     print("\nHeaders para routing:")
     print("  X-Hermes-Agent: admin  → Controle total")

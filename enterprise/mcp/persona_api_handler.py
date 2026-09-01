@@ -1,20 +1,20 @@
 """
-HTTP handler for POST /api/ana/message — the Ana atendente inbound endpoint.
+HTTP handler for POST /api/ana/message — the atendente inbound endpoint.
 
 Extracted from gateway/platforms/api_server.py. The API server registers
-this as a route via the hook in enterprise/mcp/ana_routes.py.
+this as a route via the hook in enterprise/mcp/persona_routes.py.
 """
 import re
 import logging
 from typing import TYPE_CHECKING
 
-from enterprise.mcp.ana_pg_store import (
-    ana_idle_seconds,
-    ana_pg_session_id,
-    load_ana_session_from_pg,
-    load_ana_history_from_pg,
-    persist_ana_turn,
-    reset_ana_session_in_pg,
+from enterprise.mcp.pg_session_store import (
+    idle_seconds,
+    pg_session_id,
+    load_session_from_pg,
+    load_history_from_pg,
+    persist_turn,
+    reset_session_in_pg,
 )
 
 if TYPE_CHECKING:
@@ -29,8 +29,8 @@ def _openai_error(message: str, code: str = "error") -> dict:
     return {"error": {"message": message, "type": "invalid_request_error", "code": code}}
 
 
-async def handle_ana_message(adapter, request: "web.Request") -> "web.Response":
-    """POST /api/ana/message — inbound turn for the Ana atendente.
+async def handle_persona_message(adapter, request: "web.Request") -> "web.Response":
+    """POST /api/ana/message — inbound turn for the persona atendente.
 
     ``adapter`` is the APIServerAdapter instance (provides _check_auth,
     _read_json_body, _run_agent, config, gateway_runner).
@@ -67,7 +67,7 @@ async def handle_ana_message(adapter, request: "web.Request") -> "web.Response":
             _openai_error("Invalid sessionKey", code="invalid_session_key"),
             status=400,
         )
-    sid = ana_pg_session_id(safe_key)
+    sid = pg_session_id(safe_key)
 
     # 72h idle TTL
     idle_minutes = 4320
@@ -82,14 +82,14 @@ async def handle_ana_message(adapter, request: "web.Request") -> "web.Response":
         except Exception:
             pass
 
-    pg_session = load_ana_session_from_pg(sid)
-    if pg_session and ana_idle_seconds(
+    pg_session = load_session_from_pg(sid)
+    if pg_session and idle_seconds(
         pg_session.get("updated_at") or pg_session.get("created_at")
     ) > idle_minutes * 60:
-        reset_ana_session_in_pg(sid)
+        reset_session_in_pg(sid)
         pg_session = None
 
-    history = load_ana_history_from_pg(sid)
+    history = load_history_from_pg(sid)
 
     ephemeral_system_prompt = None
     if push_name:
@@ -112,10 +112,10 @@ async def handle_ana_message(adapter, request: "web.Request") -> "web.Response":
             import asyncio as _asyncio
             loop = _asyncio.get_event_loop()
             await loop.run_in_executor(
-                None, persist_ana_turn, safe_key, message, final_response, push_name,
+                None, persist_turn, safe_key, message, final_response, push_name,
             )
         except Exception:
-            logger.debug("Ana turn persist failed", exc_info=True)
+            logger.debug("Persona turn persist failed", exc_info=True)
 
     return web.json_response({
         "object": "hermes.ana.message",

@@ -1,6 +1,6 @@
 """Enterprise — Sessões da Ana por cliente (cell).
 
-Gerencia sessões stateful da Ana no PostgreSQL.
+    Gerencia sessões stateful por persona no PostgreSQL.
 Cada cliente (cell) tem sua própria sessão com histórico isolado.
 """
 
@@ -43,8 +43,25 @@ async def close_pool() -> None:
 # ---------------------------------------------------------------------------
 
 SCHEMA_SQL = """
+-- Rename legacy objects before creating destination objects. Both-name
+-- collisions fail closed to avoid hiding legacy data behind an empty table.
+DO $$
+BEGIN
+    IF to_regclass('ana_sessions') IS NOT NULL AND to_regclass('sessions') IS NOT NULL THEN RAISE EXCEPTION 'Both ana_sessions and sessions exist'; END IF;
+    IF to_regclass('ana_messages') IS NOT NULL AND to_regclass('messages') IS NOT NULL THEN RAISE EXCEPTION 'Both ana_messages and messages exist'; END IF;
+    IF to_regclass('ana_customers') IS NOT NULL AND to_regclass('customers') IS NOT NULL THEN RAISE EXCEPTION 'Both ana_customers and customers exist'; END IF;
+    IF to_regclass('ana_config') IS NOT NULL AND to_regclass('config') IS NOT NULL THEN RAISE EXCEPTION 'Both ana_config and config exist'; END IF;
+    IF to_regclass('ana_stats') IS NOT NULL AND to_regclass('stats') IS NOT NULL THEN RAISE EXCEPTION 'Both ana_stats and stats exist'; END IF;
+    IF to_regclass('ana_active_sessions') IS NOT NULL AND to_regclass('active_sessions') IS NOT NULL THEN RAISE EXCEPTION 'Both ana_active_sessions and active_sessions exist'; END IF;
+    IF to_regclass('ana_sessions') IS NOT NULL AND to_regclass('sessions') IS NULL THEN ALTER TABLE ana_sessions RENAME TO sessions; END IF;
+    IF to_regclass('ana_messages') IS NOT NULL AND to_regclass('messages') IS NULL THEN ALTER TABLE ana_messages RENAME TO messages; END IF;
+    IF to_regclass('ana_customers') IS NOT NULL AND to_regclass('customers') IS NULL THEN ALTER TABLE ana_customers RENAME TO customers; END IF;
+    IF to_regclass('ana_config') IS NOT NULL AND to_regclass('config') IS NULL THEN ALTER TABLE ana_config RENAME TO config; END IF;
+    IF to_regclass('ana_stats') IS NOT NULL AND to_regclass('stats') IS NULL THEN ALTER VIEW ana_stats RENAME TO stats; END IF;
+    IF to_regclass('ana_active_sessions') IS NOT NULL AND to_regclass('active_sessions') IS NULL THEN ALTER VIEW ana_active_sessions RENAME TO active_sessions; END IF;
+END $$;
 -- Tabela de sessões por cliente (compartilhada entre personas)
-CREATE TABLE IF NOT EXISTS ana_sessions (
+CREATE TABLE IF NOT EXISTS sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     persona VARCHAR(50) NOT NULL DEFAULT 'atendimento',  -- qual persona é dona da sessão
     cell VARCHAR(20) NOT NULL,  -- Número do cliente (ex: 5583999999999)
@@ -58,16 +75,16 @@ CREATE TABLE IF NOT EXISTS ana_sessions (
 );
 
 -- Índices para busca rápida
-CREATE INDEX IF NOT EXISTS idx_ana_sessions_persona ON ana_sessions(persona);
-CREATE INDEX IF NOT EXISTS idx_ana_sessions_cell ON ana_sessions(cell);
-CREATE INDEX IF NOT EXISTS idx_ana_sessions_status ON ana_sessions(status);
-CREATE INDEX IF NOT EXISTS idx_ana_sessions_last_message ON ana_sessions(last_message_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_persona ON sessions(persona);
+CREATE INDEX IF NOT EXISTS idx_sessions_cell ON sessions(cell);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_sessions_last_message ON sessions(last_message_at);
 
 -- Tabela de mensagens (histórico por sessão)
-CREATE TABLE IF NOT EXISTS ana_messages (
+CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     persona VARCHAR(50) NOT NULL DEFAULT 'atendimento',  -- replica da sessão p/ filtro direto
-    session_id VARCHAR(100) NOT NULL REFERENCES ana_sessions(session_id),
+    session_id VARCHAR(100) NOT NULL REFERENCES sessions(session_id),
     role VARCHAR(20) NOT NULL,  -- user, assistant, system
     content TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -76,9 +93,9 @@ CREATE TABLE IF NOT EXISTS ana_messages (
 );
 
 -- Índices para mensagens
-CREATE INDEX IF NOT EXISTS idx_ana_messages_persona ON ana_messages(persona);
-CREATE INDEX IF NOT EXISTS idx_ana_messages_session ON ana_messages(session_id);
-CREATE INDEX IF NOT EXISTS idx_ana_messages_created ON ana_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_persona ON messages(persona);
+CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 
 -- Tabela de audit log para mudanças autônomas
 CREATE TABLE IF NOT EXISTS hermes_audit_log (
@@ -105,14 +122,14 @@ MIGRATE_SQL = """
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_name='ana_sessions' AND column_name='persona') THEN
-        ALTER TABLE ana_sessions ADD COLUMN persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
-        CREATE INDEX IF NOT EXISTS idx_ana_sessions_persona ON ana_sessions(persona);
+                    WHERE table_name='sessions' AND column_name='persona') THEN
+         ALTER TABLE sessions ADD COLUMN persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
+         CREATE INDEX IF NOT EXISTS idx_sessions_persona ON sessions(persona);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_name='ana_messages' AND column_name='persona') THEN
-        ALTER TABLE ana_messages ADD COLUMN persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
-        CREATE INDEX IF NOT EXISTS idx_ana_messages_persona ON ana_messages(persona);
+                    WHERE table_name='messages' AND column_name='persona') THEN
+         ALTER TABLE messages ADD COLUMN persona VARCHAR(50) NOT NULL DEFAULT 'atendimento';
+         CREATE INDEX IF NOT EXISTS idx_messages_persona ON messages(persona);
     END IF;
 END $$;
 """
@@ -141,7 +158,7 @@ async def get_or_create_session(persona: str, cell: str, name: str = None) -> Di
         # Buscar sessão ativa existente da persona
         row = await conn.fetchrow("""
             SELECT session_id, status, metadata, created_at
-            FROM ana_sessions
+            FROM sessions
             WHERE persona = $1 AND cell = $2 AND status = 'active'
             ORDER BY last_message_at DESC NULLS LAST
             LIMIT 1
@@ -150,7 +167,7 @@ async def get_or_create_session(persona: str, cell: str, name: str = None) -> Di
         if row:
             # Atualizar timestamp
             await conn.execute("""
-                UPDATE ana_sessions
+                UPDATE sessions
                 SET last_message_at = NOW(), updated_at = NOW()
                 WHERE session_id = $1
             """, row["session_id"])
@@ -168,7 +185,7 @@ async def get_or_create_session(persona: str, cell: str, name: str = None) -> Di
         session_id = f"{persona}-{cell}-{uuid.uuid4().hex[:8]}"
         
         await conn.execute("""
-            INSERT INTO ana_sessions (persona, cell, session_id, status, metadata)
+            INSERT INTO sessions (persona, cell, session_id, status, metadata)
             VALUES ($1, $2, $3, 'active', $4)
         """, persona, cell, session_id, json.dumps({"name": name}) if name else "{}")
         
@@ -194,13 +211,13 @@ async def save_message(
     
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO ana_messages (persona, session_id, role, content, tokens_used, tool_calls)
+            INSERT INTO messages (persona, session_id, role, content, tokens_used, tool_calls)
             VALUES ($1, $2, $3, $4, $5, $6)
         """, persona, session_id, role, content, tokens_used, json.dumps(tool_calls or []))
         
         # Atualizar contadores da sessão
         await conn.execute("""
-            UPDATE ana_sessions
+            UPDATE sessions
             SET message_count = message_count + 1,
                 last_message_at = NOW(),
                 updated_at = NOW()
@@ -218,7 +235,7 @@ async def get_conversation_history(
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT role, content, created_at, tokens_used, tool_calls
-            FROM ana_messages
+            FROM messages
             WHERE session_id = $1
             ORDER BY created_at DESC
             LIMIT $2
@@ -244,7 +261,7 @@ async def archive_session(session_id: str) -> None:
     
     async with pool.acquire() as conn:
         await conn.execute("""
-            UPDATE ana_sessions
+            UPDATE sessions
             SET status = 'archived', updated_at = NOW()
             WHERE session_id = $1
         """, session_id)
@@ -261,7 +278,7 @@ async def get_session_stats(persona: str = None, cell: str = None) -> Dict[str, 
                     COUNT(*) as total_sessions,
                     SUM(message_count) as total_messages,
                     MAX(last_message_at) as last_activity
-                FROM ana_sessions
+                FROM sessions
                 WHERE cell = $1
             """
             params = [cell]
@@ -276,7 +293,7 @@ async def get_session_stats(persona: str = None, cell: str = None) -> Dict[str, 
                         SUM(message_count) as total_messages,
                         COUNT(DISTINCT cell) as unique_clients,
                         MAX(last_message_at) as last_activity
-                    FROM ana_sessions
+                    FROM sessions
                     WHERE persona = $1
                 """
                 params = [persona]
@@ -288,7 +305,7 @@ async def get_session_stats(persona: str = None, cell: str = None) -> Dict[str, 
                         COUNT(DISTINCT cell) as unique_clients,
                         COUNT(DISTINCT persona) as personas,
                         MAX(last_message_at) as last_activity
-                    FROM ana_sessions
+                    FROM sessions
                 """
                 params = []
         
