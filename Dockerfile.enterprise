@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     build-essential \
     libpq-dev \
+    util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # Usuário não-root
@@ -90,7 +91,14 @@ RUN chmod +x /home/hermes/enterprise-entrypoint.sh
 # config edits). The project source lives at /app (PYTHONPATH), so `uv pip
 # install -r pyproject.toml` installs deps but never generates the console
 # script — wire a thin wrapper that calls the module entry point.
-RUN printf '#!/usr/bin/env bash\nexec python -m hermes_cli.main "$@"\n' > /usr/local/bin/hermes \
+RUN printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [ "$(id -u)" = "0" ] && [ "${HERMES_DOCKER_EXEC_AS_ROOT:-}" != "1" ]; then' \
+    '    export HOME=/home/hermes' \
+    '    exec setpriv --reuid=hermes --regid=hermes --clear-groups python -m hermes_cli.main "$@"' \
+    'fi' \
+    'exec python -m hermes_cli.main "$@"' \
+    > /usr/local/bin/hermes \
     && chmod +x /usr/local/bin/hermes
 
 # Entry point - usa enterprise entrypoint
