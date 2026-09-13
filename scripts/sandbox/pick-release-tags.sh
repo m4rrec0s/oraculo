@@ -13,23 +13,27 @@
 # between (config-schema bumps, venv layout changes, dependency floors).
 #
 # Usage:
-#   scripts/sandbox/pick-release-tags.sh [--count N] [--repo DIR]
+#   scripts/sandbox/pick-release-tags.sh [--count N] [--repo DIR] [--fallback-ref REF]
 #
 #   --count   how many tags to emit (default 5, minimum 1). Fewer tags than
 #             requested emits all of them.
 #   --repo    repository to read tags from (default: this checkout).
+#   --fallback-ref
+#             ref to emit as a single-entry JSON array when no release tags
+#             exist. Useful for repos before their first release tag.
 #
 # Reads tags from the local checkout, so it needs one fetched with tags
 # (actions/checkout with fetch-depth: 0, or `fetch-tags: true`). A shallow
 # checkout has no tags and this exits non-zero rather than silently emitting an
 # empty matrix.
 #
-# Only vYYYY.M.D[.N] release tags are considered; the repo also carries
-# backup/* and one-off tags that are not releases.
+# Only vX.Y.Z[.N] release tags are considered; the repo also carries backup/*
+# and one-off tags that are not releases.
 
 set -euo pipefail
 
 COUNT=5
+FALLBACK_REF=""
 # Default to the repository containing this script, resolved through its real
 # path so a symlinked or copied script still reads the checkout it lives in
 # rather than whatever repo the caller happens to be standing in.
@@ -42,6 +46,9 @@ while [ "$#" -gt 0 ]; do
     --repo)
       [ "$#" -ge 2 ] || { echo 'error: --repo needs a value' >&2; exit 1; }
       REPO="$2"; shift 2 ;;
+    --fallback-ref)
+      [ "$#" -ge 2 ] || { echo 'error: --fallback-ref needs a value' >&2; exit 1; }
+      FALLBACK_REF="$2"; shift 2 ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "error: unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -68,12 +75,17 @@ fi
 # lexicographic sort gets wrong.
 mapfile -t tags < <(
   git -C "$REPO" tag --list 'v*' \
-    | grep -E '^v[0-9]{4}\.[0-9]+\.[0-9]+(\.[0-9]+)?$' \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$' \
     | sort -V
 )
 
 total="${#tags[@]}"
 if [ "$total" -eq 0 ]; then
+  if [ -n "$FALLBACK_REF" ]; then
+    echo "warning: no release tags found in $REPO; falling back to $FALLBACK_REF" >&2
+    printf '["%s"]\n' "$FALLBACK_REF"
+    exit 0
+  fi
   echo "error: no release tags found in $REPO" >&2
   echo '       A shallow clone has no tags: fetch with tags (actions/checkout' >&2
   echo '       with fetch-depth: 0, or fetch-tags: true).' >&2
